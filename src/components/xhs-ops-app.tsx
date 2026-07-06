@@ -651,6 +651,32 @@ function readMobilePublishCardFromLocation() {
   return decodeMobilePublishCardHash(window.location.hash);
 }
 
+function readPositioningInputFromLocation(projectId: string): AccountPositioningInput | undefined {
+  if (typeof window === "undefined") return undefined;
+  const params = new URLSearchParams(window.location.search);
+  const subjectArea = params.get("subjectArea")?.trim();
+  const audience = params.get("audience")?.trim();
+  const differentiator = params.get("differentiator")?.trim();
+  const tone = params.get("tone")?.trim();
+
+  if (!subjectArea || !audience || !differentiator || !tone) {
+    return undefined;
+  }
+
+  return {
+    projectId,
+    subjectArea,
+    audience,
+    differentiator,
+    tone,
+  };
+}
+
+function readHomepageTextFromLocation() {
+  if (typeof window === "undefined") return undefined;
+  return new URLSearchParams(window.location.search).get("homepageText")?.trim() || undefined;
+}
+
 function currentMobileCardUrlParts() {
   if (typeof window === "undefined") {
     return {
@@ -865,16 +891,19 @@ export function XhsOpsApp({
   initialHomepageText,
   initialProviderStatus,
 }: XhsOpsAppProps = {}) {
-  const shouldLoadStoredWorkspace = !initialPositioningInput && !initialHomepageText;
-  const storedWorkspaceAtRender = shouldLoadStoredWorkspace ? readStoredWorkspace() : null;
   const storedProjectAtRender = readStoredProject();
+  const browserHomepageTextAtRender = initialHomepageText ?? readHomepageTextFromLocation();
+  const browserPositioningInputAtRender =
+    initialPositioningInput ?? readPositioningInputFromLocation((storedProjectAtRender ?? demoProject).id);
+  const shouldLoadStoredWorkspace = !browserPositioningInputAtRender && !browserHomepageTextAtRender;
+  const storedWorkspaceAtRender = shouldLoadStoredWorkspace ? readStoredWorkspace() : null;
   const storedOpenAiSettingsAtRender = readStoredOpenAiSettings();
   const initialProject = storedWorkspaceAtRender?.project ?? storedProjectAtRender ?? demoProject;
-  const initialHomepageAnalysis = storedWorkspaceAtRender?.homepageAnalysis ?? (initialHomepageText
-    ? analyzeAccountHomepage(parseHomepageText(initialHomepageText, initialProject.id))
+  const initialHomepageAnalysis = storedWorkspaceAtRender?.homepageAnalysis ?? (browserHomepageTextAtRender
+    ? analyzeAccountHomepage(parseHomepageText(browserHomepageTextAtRender, initialProject.id))
     : null);
   const derivedPositioningInput =
-    initialPositioningInput ??
+    browserPositioningInputAtRender ??
     (initialHomepageAnalysis ? buildPositioningInputFromHomepage(initialHomepageAnalysis) : undefined);
   const initialPositioning =
     storedWorkspaceAtRender?.accountPositioning ??
@@ -912,7 +941,7 @@ export function XhsOpsApp({
     ? "工作区已恢复"
     : initialHomepageAnalysis
       ? "本地模板已分析主页"
-      : initialPositioningInput
+      : browserPositioningInputAtRender
         ? "本地模板已生成"
         : "本地模板模式";
   const [generationMode, setGenerationMode] = useState<GenerationMode>(
@@ -962,7 +991,7 @@ export function XhsOpsApp({
   const [accountPositioning, setAccountPositioning] =
     useState<AccountPositioning>(initialPositioning);
   const [rawHomepageText, setRawHomepageText] = useState(
-    storedWorkspaceAtRender?.rawHomepageText ?? initialHomepageText ?? demoHomepageText
+    storedWorkspaceAtRender?.rawHomepageText ?? browserHomepageTextAtRender ?? demoHomepageText
   );
   const [homepageAnalysis, setHomepageAnalysis] =
     useState<AccountHomepageAnalysis | null>(initialHomepageAnalysis);
@@ -1787,7 +1816,9 @@ export function XhsOpsApp({
             <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold uppercase text-[#6D6A61] sm:w-64">
               生成模式
               <select
+                aria-label="生成模式"
                 className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                name="generationMode"
                 value={generationMode}
                 onChange={(event) => {
                   const nextMode = event.target.value as GenerationMode;
@@ -2061,6 +2092,7 @@ export function XhsOpsApp({
                   <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
                     差异化承诺
                     <textarea
+                      aria-label="差异化承诺"
                       className="min-h-20 rounded-md border border-[#CFC7B5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
                       name="differentiator"
                       required
@@ -2078,6 +2110,18 @@ export function XhsOpsApp({
                       onChange={(event) => setAccountTone(event.target.value)}
                     />
                   </label>
+                  <button
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#9AA89F]"
+                    disabled={isGeneratingPositioning}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void handleGeneratePositioning();
+                    }}
+                    type="submit"
+                  >
+                    <Sparkles size={16} />
+                    生成定位方案
+                  </button>
                 </div>
               </form>
 

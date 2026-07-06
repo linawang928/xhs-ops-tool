@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "./page";
@@ -93,6 +93,19 @@ describe("home dashboard", () => {
     expect(screen.getByLabelText("OpenAI API Key")).toBeInTheDocument();
     expect(screen.getByLabelText("OpenAI Base URL")).toHaveValue("https://api.openai.com/v1");
     expect(screen.getByRole("button", { name: "保存 OpenAI 设置" })).toBeInTheDocument();
+  });
+
+  it("exposes positioning generation controls as explicit form controls", async () => {
+    await renderHome();
+
+    expect(screen.getByLabelText("生成模式")).toHaveAttribute("name", "generationMode");
+    expect(screen.getByLabelText("生成模式")).toHaveAttribute("aria-label", "生成模式");
+    expect(screen.getByLabelText("差异化承诺")).toHaveAttribute("aria-label", "差异化承诺");
+    expect(
+      within(screen.getByRole("form", { name: "账号定位生成" })).getByRole("button", {
+        name: "生成定位方案",
+      })
+    ).toHaveAttribute("type", "submit");
   });
 
   it("saves project settings locally and applies custom forbidden words to compliance checks", async () => {
@@ -211,6 +224,21 @@ describe("home dashboard", () => {
     ).toBeGreaterThan(0);
     expect(screen.getAllByText(/租房党和小户型新手/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/低预算、可复用/).length).toBeGreaterThan(0);
+  });
+
+  it("hydrates generated positioning from browser query params on static pages", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?subjectArea=%E5%92%96%E5%95%A1%E5%85%A5%E9%97%A8&audience=%E6%83%B3%E5%9C%A8%E5%AE%B6%E5%86%B2%E5%92%96%E5%95%A1%E7%9A%84%E6%96%B0%E6%89%8B&differentiator=%E6%8A%8A%E5%99%A8%E5%85%B7%E9%80%89%E6%8B%A9%E5%92%8C%E5%86%B2%E7%85%AE%E5%8F%98%E9%87%8F%E6%8B%86%E6%88%90%E4%B8%8D%E6%B5%AA%E8%B4%B9%E9%92%B1%E7%9A%84%E6%AD%A5%E9%AA%A4&tone=%E8%BD%BB%E6%9D%BE%E3%80%81%E5%85%B7%E4%BD%93%E3%80%81%E6%9C%89%E4%B8%80%E7%82%B9%E4%B8%93%E4%B8%9A%E6%84%9F"
+    );
+
+    await renderHome();
+
+    expect((await screen.findAllByRole("heading", { name: "咖啡入门自查室" })).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("账号主体区")).toHaveValue("咖啡入门");
+    expect(screen.getByLabelText("选题关键词")).toHaveValue("咖啡入门");
+    expect(screen.getAllByText(/在家冲咖啡的新手/).length).toBeGreaterThan(0);
   });
 
   it("keeps benchmark subject filters usable after generating a custom account positioning", async () => {
