@@ -1,6 +1,17 @@
-import type { ContentDraft, PublishTask } from "./types";
+import type { ContentDraft, GeneratedPosterAsset, PosterAssetSource, PublishTask } from "./types";
 
 export const XHS_APP_PUBLISH_URL = "xhsdiscover://post";
+const MAX_INLINE_ASSET_URL_LENGTH = 120_000;
+const MAX_INLINE_ASSET_COUNT = 6;
+
+export interface MobilePublishCardAssetPreview {
+  cardId: string;
+  fileName: string;
+  mimeType: string;
+  source: PosterAssetSource;
+  description: string;
+  url: string;
+}
 
 export interface MobilePublishCardPayload {
   version: 1;
@@ -13,6 +24,7 @@ export interface MobilePublishCardPayload {
   xhsAppPublishUrl: string;
   checklist: string[];
   assetManifest: PublishTask["assetManifest"];
+  assetPreviews: MobilePublishCardAssetPreview[];
 }
 
 interface UrlParts {
@@ -50,9 +62,45 @@ function normalizePathname(pathname: string) {
   return pathname.startsWith("/") ? pathname : `/${pathname}`;
 }
 
+function createAssetPreviews(assets: GeneratedPosterAsset[]): MobilePublishCardAssetPreview[] {
+  return assets
+    .filter((asset) => asset.url.startsWith("data:") && asset.url.length <= MAX_INLINE_ASSET_URL_LENGTH)
+    .slice(0, MAX_INLINE_ASSET_COUNT)
+    .map((asset) => ({
+      cardId: asset.cardId,
+      fileName: asset.fileName,
+      mimeType: asset.mimeType,
+      source: asset.source,
+      description: asset.alt,
+      url: asset.url,
+    }));
+}
+
+function isPosterAssetSource(value: string): value is PosterAssetSource {
+  return value === "template" || value === "openai";
+}
+
+function isMobileAssetPreview(value: unknown): value is MobilePublishCardAssetPreview {
+  const asset = value as Partial<MobilePublishCardAssetPreview>;
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof asset.cardId === "string" &&
+    typeof asset.fileName === "string" &&
+    typeof asset.mimeType === "string" &&
+    typeof asset.source === "string" &&
+    isPosterAssetSource(asset.source) &&
+    typeof asset.description === "string" &&
+    typeof asset.url === "string" &&
+    asset.url.startsWith("data:") &&
+    asset.url.length <= MAX_INLINE_ASSET_URL_LENGTH
+  );
+}
+
 export function createMobilePublishCardPayload(
   task: PublishTask,
-  draft: ContentDraft
+  draft: ContentDraft,
+  assets: GeneratedPosterAsset[] = []
 ): MobilePublishCardPayload {
   return {
     version: 1,
@@ -65,6 +113,7 @@ export function createMobilePublishCardPayload(
     xhsAppPublishUrl: XHS_APP_PUBLISH_URL,
     checklist: task.checklist,
     assetManifest: task.assetManifest,
+    assetPreviews: createAssetPreviews(assets),
   };
 }
 
@@ -106,6 +155,11 @@ export function decodeMobilePublishCardHash(hash: string): MobilePublishCardPayl
         : [],
       assetManifest: Array.isArray(parsed.assetManifest)
         ? (parsed.assetManifest as PublishTask["assetManifest"])
+        : [],
+      assetPreviews: Array.isArray(parsed.assetPreviews)
+        ? parsed.assetPreviews
+            .filter(isMobileAssetPreview)
+            .slice(0, MAX_INLINE_ASSET_COUNT)
         : [],
     };
   } catch {

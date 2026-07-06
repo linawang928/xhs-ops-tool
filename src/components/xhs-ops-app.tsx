@@ -45,6 +45,7 @@ import {
   createMobilePublishCardPayload,
   createMobilePublishCardUrl,
   decodeMobilePublishCardHash,
+  type MobilePublishCardAssetPreview,
   type MobilePublishCardPayload,
 } from "@/lib/core/publish-card";
 import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/publish";
@@ -714,6 +715,12 @@ async function posterAssetToFile(asset: GeneratedPosterAsset) {
   return new File([blob], asset.fileName, { type: asset.mimeType });
 }
 
+async function mobileAssetPreviewToFile(asset: MobilePublishCardAssetPreview) {
+  const response = await fetch(asset.url);
+  const blob = await response.blob();
+  return new File([blob], asset.fileName, { type: asset.mimeType });
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 border-l border-[#2E6B5F]/30 px-4">
@@ -788,6 +795,27 @@ function MobilePublishCardView({ payload }: { payload: MobilePublishCardPayload 
 
   async function handleShareCardText() {
     if (typeof navigator !== "undefined" && "share" in navigator) {
+      const nav = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean;
+      };
+      try {
+        const previewFiles =
+          payload.assetPreviews.length > 0
+            ? await Promise.all(payload.assetPreviews.slice(0, 4).map(mobileAssetPreviewToFile))
+            : [];
+        if (previewFiles.length > 0 && nav.canShare?.({ files: previewFiles })) {
+          await nav.share({
+            title: payload.title,
+            text: payload.exportText,
+            files: previewFiles,
+          });
+          setSharedCard(true);
+          return;
+        }
+      } catch {
+        // Fall back to text-only sharing when a browser cannot materialize data-url files.
+      }
+
       await navigator.share({
         title: payload.title,
         text: payload.exportText,
@@ -860,6 +888,36 @@ function MobilePublishCardView({ payload }: { payload: MobilePublishCardPayload 
             </a>
           </div>
         </section>
+
+        {payload.assetPreviews.length > 0 && (
+          <section className="rounded-lg border border-[#D8D2C1] bg-white p-5">
+            <p className="text-xs font-semibold uppercase text-[#6D6A61]">素材预览</p>
+            <div className="mt-3 grid gap-3">
+              {payload.assetPreviews.map((asset) => (
+                <div key={`${asset.cardId}-${asset.fileName}`} className="grid gap-2">
+                  <NextImage
+                    src={asset.url}
+                    alt={asset.description}
+                    width={1080}
+                    height={1440}
+                    unoptimized
+                    className="aspect-[3/4] w-full rounded-md border border-[#D8D2C1] object-cover"
+                  />
+                  <div className="flex items-center justify-between gap-2 text-xs text-[#6D6A61]">
+                    <span className="min-w-0 truncate">{asset.fileName}</span>
+                    <a
+                      className="inline-flex h-8 items-center rounded-md border border-[#D8D2C1] bg-[#FCFAF3] px-2 font-semibold text-[#214F45]"
+                      href={asset.url}
+                      download={asset.fileName}
+                    >
+                      下载素材
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-lg border border-[#D8D2C1] bg-white p-5">
           <p className="text-xs font-semibold uppercase text-[#6D6A61]">素材清单</p>
@@ -1769,7 +1827,7 @@ export function XhsOpsApp({
   }
 
   async function handleCreateMobilePublishCard() {
-    const payload = createMobilePublishCardPayload(publishTask, draft);
+    const payload = createMobilePublishCardPayload(publishTask, draft, posterImages);
     const url = createMobilePublishCardUrl(payload, currentMobileCardUrlParts());
     setMobilePublishCardUrl(url);
     setMobileCardStatus("手机卡已生成");

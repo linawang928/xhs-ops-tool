@@ -29,6 +29,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window.navigator, "share");
+  Reflect.deleteProperty(window.navigator, "canShare");
   window.localStorage?.clear();
   window.history.replaceState(null, "", "/");
 });
@@ -723,21 +724,41 @@ describe("home dashboard", () => {
     window.history.replaceState(null, "", `${window.location.origin}/xhs-ops-tool/`);
     await renderHome();
 
+    await user.click(screen.getByRole("button", { name: "生成海报" }));
     await user.click(screen.getByRole("button", { name: "生成手机卡" }));
 
     const link = screen.getByRole("link", { name: "打开手机卡" });
     expect(link).toHaveAttribute("href", expect.stringContaining("#publish-card="));
     expect(clipboardMock).toHaveBeenCalledWith(expect.stringContaining("#publish-card="));
+    const copiedUrl = String(clipboardMock.mock.calls.at(-1)?.[0] ?? "");
+    const encodedPayload = copiedUrl.split("#publish-card=")[1];
+    const decodedPayload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+    expect(decodedPayload.assetPreviews.length).toBeGreaterThan(0);
+    expect(decodedPayload.assetPreviews[0]).toMatchObject({
+      fileName: expect.stringContaining("xhs-poster-1"),
+      source: "template",
+    });
     expect(screen.getByText("手机卡已生成")).toBeInTheDocument();
   });
 
   it("opens a mobile publish card from the URL hash", async () => {
     const user = userEvent.setup();
     const clipboardMock = vi.fn().mockResolvedValue(undefined);
+    const shareMock = vi.fn().mockResolvedValue(undefined);
+    const canShareMock = vi.fn().mockReturnValue(true);
     Object.defineProperty(window.navigator, "clipboard", {
       value: { writeText: clipboardMock },
       configurable: true,
     });
+    Object.defineProperty(window.navigator, "share", {
+      value: shareMock,
+      configurable: true,
+    });
+    Object.defineProperty(window.navigator, "canShare", {
+      value: canShareMock,
+      configurable: true,
+    });
+    const posterUrl = "data:image/svg+xml;charset=utf-8,%3Csvg%3Eposter%3C%2Fsvg%3E";
     const payload = {
       version: 1,
       title: "租房收纳别乱买，先做这 4 步",
@@ -749,6 +770,16 @@ describe("home dashboard", () => {
       scheduledAt: "2026-07-07T12:30:00.000Z",
       checklist: ["确认素材已保存"],
       assetManifest: [{ fileName: "xhs-poster-1.svg", source: "template" }],
+      assetPreviews: [
+        {
+          cardId: "card-1",
+          fileName: "xhs-poster-1.svg",
+          mimeType: "image/svg+xml",
+          source: "template",
+          description: "封面模板海报",
+          url: posterUrl,
+        },
+      ],
     };
     const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
     window.history.replaceState(null, "", `/#publish-card=${encoded}`);
@@ -757,11 +788,22 @@ describe("home dashboard", () => {
 
     expect(screen.getByRole("heading", { name: "手机发布卡" })).toBeInTheDocument();
     expect(screen.getByText("租房收纳别乱买，先做这 4 步")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "封面模板海报" })).toHaveAttribute("src", posterUrl);
+    expect(screen.getByRole("link", { name: "下载素材" })).toHaveAttribute("download", "xhs-poster-1.svg");
     const copyAndOpen = screen.getByRole("link", { name: "复制并打开小红书" });
     expect(copyAndOpen).toHaveAttribute("href", "xhsdiscover://post");
     copyAndOpen.addEventListener("click", (event) => event.preventDefault(), { once: true });
     await user.click(copyAndOpen);
     expect(clipboardMock).toHaveBeenCalledWith(payload.exportText);
+    await user.click(screen.getByRole("button", { name: "系统分享" }));
+    expect(canShareMock).toHaveBeenCalledWith(expect.objectContaining({ files: expect.any(Array) }));
+    expect(shareMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: payload.title,
+        text: payload.exportText,
+        files: expect.arrayContaining([expect.objectContaining({ name: "xhs-poster-1.svg" })]),
+      })
+    );
     expect(screen.getByRole("link", { name: "打开小红书" })).toHaveAttribute("href", "xhsdiscover://post");
     expect(screen.getByRole("link", { name: "网页发布" })).toHaveAttribute(
       "href",
