@@ -356,6 +356,24 @@ describe("home dashboard", () => {
     expect(await screen.findByText("租房收纳别乱买，先做这 4 步")).toBeInTheDocument();
   });
 
+  it("lets operators edit the draft and syncs compliance plus publish package", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.clear(screen.getByLabelText("笔记标题"));
+    await user.type(screen.getByLabelText("笔记标题"), "租房收纳先做入口区");
+    await user.clear(screen.getByLabelText("正文"));
+    await user.type(screen.getByLabelText("正文"), "先把钥匙、快递和包的位置固定下来。");
+    await user.clear(screen.getByLabelText("话题标签"));
+    await user.type(screen.getByLabelText("话题标签"), "租房收纳, 入口区整理");
+
+    expect(screen.getByLabelText("合规检测文本")).toHaveValue(
+      "租房收纳先做入口区\n先把钥匙、快递和包的位置固定下来。"
+    );
+    expect(screen.getAllByText(/租房收纳先做入口区/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/#租房收纳 #入口区整理/)).toBeInTheDocument();
+  });
+
   it("generates and previews an OpenAI poster image", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockResolvedValue({

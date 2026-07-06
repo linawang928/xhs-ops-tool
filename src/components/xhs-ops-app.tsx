@@ -229,6 +229,13 @@ function splitList(value: string) {
     .filter(Boolean);
 }
 
+function splitHashtags(value: string) {
+  return value
+    .split(/[#,\s，、\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function parseBrandColors(value: string) {
   const colors = splitList(value).filter((color) => /^#[0-9a-f]{6}$/i.test(color));
   return colors.length > 0 ? colors.slice(0, 5) : demoProject.brandColors;
@@ -646,6 +653,7 @@ export function XhsOpsApp({
   const [rawBenchmarkText, setRawBenchmarkText] = useState(initialWorkspace.benchmark.body);
   const [benchmark, setBenchmark] = useState<BenchmarkNote>(initialWorkspace.benchmark);
   const [draft, setDraft] = useState<ContentDraft>(initialWorkspace.draft);
+  const [draftHashtagInput, setDraftHashtagInput] = useState(initialWorkspace.draft.hashtags.join(", "));
   const [scanText, setScanText] = useState(
     `${initialWorkspace.draft.selectedTitle}\n${initialWorkspace.draft.body}`
   );
@@ -738,6 +746,7 @@ export function XhsOpsApp({
     setRawBenchmarkText(nextWorkspace.benchmark.body);
     setBenchmark(nextWorkspace.benchmark);
     setDraft(nextWorkspace.draft);
+    setDraftHashtagInput(nextWorkspace.draft.hashtags.join(", "));
     setScanText(`${nextWorkspace.draft.selectedTitle}\n${nextWorkspace.draft.body}`);
     setPublishTask(nextWorkspace.publishTask);
     setPosterImages([]);
@@ -754,6 +763,102 @@ export function XhsOpsApp({
       assetManifest: posterAssetsToManifest(nextAssets),
       updatedAt: new Date().toISOString(),
     }));
+  }
+
+  function syncDraftState(nextDraft: ContentDraft, options: { clearPosters?: boolean } = {}) {
+    const nextDraftWithCompliance = {
+      ...nextDraft,
+      compliance: scanCompliance(`${nextDraft.selectedTitle}\n${nextDraft.body}`, project.forbiddenWords),
+    };
+    const nextPosterImages = options.clearPosters ? [] : posterImages;
+
+    setDraft(nextDraftWithCompliance);
+    setScanText(`${nextDraftWithCompliance.selectedTitle}\n${nextDraftWithCompliance.body}`);
+    setPublishTask((task) => {
+      const nextTask = prepareManualPublishPackage(
+        nextDraftWithCompliance,
+        project,
+        task.scheduledAt,
+        nextPosterImages
+      );
+
+      return {
+        ...nextTask,
+        status: task.status === "published" ? "ready" : task.status,
+        createdAt: task.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    if (options.clearPosters) {
+      setPosterImages([]);
+    }
+    setCopied(false);
+    setShared(false);
+    setMobilePublishCardUrl("");
+    setMobileCardStatus("");
+  }
+
+  function handleDraftTitleChange(value: string) {
+    const nextTitleOptions = value.trim()
+      ? [value, ...draft.titleOptions.filter((title) => title !== value)].slice(0, 5)
+      : draft.titleOptions;
+
+    syncDraftState({
+      ...draft,
+      selectedTitle: value,
+      titleOptions: nextTitleOptions,
+    });
+  }
+
+  function handleSelectDraftTitle(title: string) {
+    syncDraftState({
+      ...draft,
+      selectedTitle: title,
+    });
+  }
+
+  function handleDraftBodyChange(value: string) {
+    syncDraftState({
+      ...draft,
+      body: value,
+    });
+  }
+
+  function handleDraftHashtagsChange(value: string) {
+    setDraftHashtagInput(value);
+    syncDraftState({
+      ...draft,
+      hashtags: splitHashtags(value),
+    });
+  }
+
+  function handleAssetCardChange(
+    cardId: string,
+    patch: Partial<ContentDraft["assetCards"][number]>
+  ) {
+    syncDraftState(
+      {
+        ...draft,
+        assetCards: draft.assetCards.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                ...patch,
+              }
+            : card
+        ),
+      },
+      { clearPosters: true }
+    );
+  }
+
+  function handleAssetCardBulletsChange(cardId: string, value: string) {
+    handleAssetCardChange(cardId, {
+      bullets: value
+        .split(/\n+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    });
   }
 
   function handleProjectFormChange(field: keyof ProjectFormState, value: string) {
@@ -935,6 +1040,7 @@ export function XhsOpsApp({
       "2026-07-07T12:30:00.000Z"
     );
     setDraft(nextDraft);
+    setDraftHashtagInput(nextDraft.hashtags.join(", "));
     setPosterImages([]);
     setScanText(`${nextDraft.selectedTitle}\n${nextDraft.body}`);
     setPublishTask(nextTask);
@@ -1639,20 +1745,50 @@ export function XhsOpsApp({
               <article className="rounded-lg border border-[#D8D2C1] bg-white p-5">
                 <div className="flex flex-wrap gap-2">
                   {draft.titleOptions.map((title) => (
-                    <span
+                    <button
                       key={title}
-                      className={`rounded-md px-2.5 py-1 text-sm ${
+                      className={`rounded-md px-2.5 py-1 text-left text-sm ${
                         title === draft.selectedTitle
                           ? "bg-[#1F2723] text-white"
                           : "bg-[#F8F3E7] text-[#6D6A61]"
                       }`}
+                      onClick={() => handleSelectDraftTitle(title)}
+                      type="button"
                     >
                       {title}
-                    </span>
+                    </button>
                   ))}
                 </div>
-                <div className="mt-5 whitespace-pre-line text-sm leading-7 text-[#2F352F]">{draft.body}</div>
-                <div className="mt-5 flex flex-wrap gap-2">
+                <div className="mt-5 grid gap-4">
+                  <label className="grid gap-1.5 text-sm font-medium text-[#3B403C]">
+                    笔记标题
+                    <input
+                      aria-label="笔记标题"
+                      className="h-11 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                      value={draft.selectedTitle}
+                      onChange={(event) => handleDraftTitleChange(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-sm font-medium text-[#3B403C]">
+                    正文
+                    <textarea
+                      aria-label="正文"
+                      className="min-h-64 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] p-3 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
+                      value={draft.body}
+                      onChange={(event) => handleDraftBodyChange(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-sm font-medium text-[#3B403C]">
+                    话题标签
+                    <input
+                      aria-label="话题标签"
+                      className="h-11 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                      value={draftHashtagInput}
+                      onChange={(event) => handleDraftHashtagsChange(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
                   {draft.hashtags.map((tag) => (
                     <span key={tag} className="rounded-md bg-[#FFF3C9] px-2 py-1 text-xs text-[#74530C]">
                       #{tag}
@@ -1693,7 +1829,7 @@ export function XhsOpsApp({
                     </div>
                   </div>
                 )}
-                {draft.assetCards.map((card) => (
+                {draft.assetCards.map((card, cardIndex) => (
                   <div
                     key={card.id}
                     className="rounded-lg border border-[#D8D2C1] bg-white p-3"
@@ -1702,18 +1838,42 @@ export function XhsOpsApp({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase text-[#6D6A61]">{card.role}</p>
-                        <h3 className="mt-1 text-base font-semibold">{card.title}</h3>
-                        <p className="text-sm text-[#6D6A61]">{card.subtitle}</p>
+                        <div className="mt-2 grid gap-2">
+                          <label className="grid gap-1 text-xs font-medium text-[#6D6A61]">
+                            卡片标题 {cardIndex + 1}
+                            <input
+                              aria-label={`卡片标题 ${cardIndex + 1}`}
+                              className="h-9 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] px-2 text-sm font-semibold text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                              value={card.title}
+                              onChange={(event) =>
+                                handleAssetCardChange(card.id, { title: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="grid gap-1 text-xs font-medium text-[#6D6A61]">
+                            卡片副标题 {cardIndex + 1}
+                            <input
+                              aria-label={`卡片副标题 ${cardIndex + 1}`}
+                              className="h-9 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] px-2 text-sm text-[#3B403C] outline-none focus:border-[#2E6B5F]"
+                              value={card.subtitle}
+                              onChange={(event) =>
+                                handleAssetCardChange(card.id, { subtitle: event.target.value })
+                              }
+                            />
+                          </label>
+                        </div>
                       </div>
                       <ImageIcon size={18} color={card.themeColor} />
                     </div>
-                    <div className="mt-3 grid gap-1">
-                      {card.bullets.map((bullet) => (
-                        <div key={bullet} className="text-sm text-[#3B403C]">
-                          {bullet}
-                        </div>
-                      ))}
-                    </div>
+                    <label className="mt-3 grid gap-1 text-xs font-medium text-[#6D6A61]">
+                      卡片要点 {cardIndex + 1}
+                      <textarea
+                        aria-label={`卡片要点 ${cardIndex + 1}`}
+                        className="min-h-24 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] p-2 text-sm leading-5 text-[#3B403C] outline-none focus:border-[#2E6B5F]"
+                        value={card.bullets.join("\n")}
+                        onChange={(event) => handleAssetCardBulletsChange(card.id, event.target.value)}
+                      />
+                    </label>
                   </div>
                 ))}
               </div>
