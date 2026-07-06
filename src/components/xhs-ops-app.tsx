@@ -18,7 +18,7 @@ import {
   Upload,
 } from "lucide-react";
 import NextImage from "next/image";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { filterBenchmarkCandidates, generateAccountPositioning } from "@/lib/core/account";
 import { analyzeBenchmarkNote } from "@/lib/core/benchmark";
 import { scanCompliance } from "@/lib/core/compliance";
@@ -27,6 +27,7 @@ import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/p
 import { generateTopicCandidates } from "@/lib/core/topic";
 import type {
   AccountPositioning,
+  AccountPositioningInput,
   BenchmarkContentFormat,
   BenchmarkNote,
   ContentDraft,
@@ -50,6 +51,10 @@ interface GeneratedPoster {
   url: string;
   alt: string;
   cardId: string;
+}
+
+interface XhsOpsAppProps {
+  initialPositioningInput?: AccountPositioningInput;
 }
 
 const workspaceNav = [
@@ -135,22 +140,26 @@ function RiskBadge({ level }: { level: "low" | "medium" | "high" }) {
   return <span className={`rounded-md px-2.5 py-1 text-sm font-semibold ${color}`}>{labels[level]}</span>;
 }
 
-export function XhsOpsApp() {
+export function XhsOpsApp({ initialPositioningInput }: XhsOpsAppProps = {}) {
+  const initialPositioning = initialPositioningInput
+    ? generateAccountPositioning(initialPositioningInput)
+    : demoAccountPositioning;
+  const initialAiStatus = initialPositioningInput ? "本地模板已生成" : "本地模板模式";
   const [generationMode, setGenerationMode] = useState<GenerationMode>("local");
-  const [aiStatus, setAiStatus] = useState("本地模板模式");
+  const [aiStatus, setAiStatus] = useState(initialAiStatus);
   const [isGeneratingPositioning, setIsGeneratingPositioning] = useState(false);
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
   const [posterImages, setPosterImages] = useState<GeneratedPoster[]>([]);
-  const [subjectArea, setSubjectArea] = useState(demoAccountPositioning.subjectArea);
-  const [accountAudience, setAccountAudience] = useState(demoAccountPositioning.audience);
-  const [differentiator, setDifferentiator] = useState(demoAccountPositioning.differentiator);
-  const [accountTone, setAccountTone] = useState(demoAccountPositioning.tone);
+  const [subjectArea, setSubjectArea] = useState(initialPositioning.subjectArea);
+  const [accountAudience, setAccountAudience] = useState(initialPositioning.audience);
+  const [differentiator, setDifferentiator] = useState(initialPositioning.differentiator);
+  const [accountTone, setAccountTone] = useState(initialPositioning.tone);
   const [accountPositioning, setAccountPositioning] =
-    useState<AccountPositioning>(demoAccountPositioning);
+    useState<AccountPositioning>(initialPositioning);
   const [benchmarkSubjectArea, setBenchmarkSubjectArea] = useState(
-    demoAccountPositioning.benchmarkFilters.subjectArea
+    initialPositioning.benchmarkFilters.subjectArea
   );
   const [benchmarkFormat, setBenchmarkFormat] = useState<BenchmarkContentFormat>("全部");
   const [keyword, setKeyword] = useState("敏感肌修护");
@@ -231,6 +240,11 @@ export function XhsOpsApp() {
     } finally {
       setIsGeneratingPositioning(false);
     }
+  }
+
+  async function handlePositioningSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await handleGeneratePositioning();
   }
 
   async function handleGenerateTopics() {
@@ -445,8 +459,8 @@ export function XhsOpsApp() {
               aside={
                 <button
                   className="inline-flex h-10 items-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white"
-                  onClick={handleGeneratePositioning}
-                  type="button"
+                  form="positioning-form"
+                  type="submit"
                   disabled={isGeneratingPositioning}
                 >
                   <Sparkles size={16} />
@@ -455,12 +469,21 @@ export function XhsOpsApp() {
               }
             />
             <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-              <div className="rounded-lg border border-[#D8D2C1] bg-white p-4">
+              <form
+                id="positioning-form"
+                aria-label="账号定位生成"
+                action="/"
+                method="get"
+                onSubmit={handlePositioningSubmit}
+                className="rounded-lg border border-[#D8D2C1] bg-white p-4"
+              >
                 <div className="grid gap-3">
                   <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
                     账号主体区
                     <input
                       className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                      name="subjectArea"
+                      required
                       value={subjectArea}
                       onChange={(event) => setSubjectArea(event.target.value)}
                     />
@@ -469,6 +492,8 @@ export function XhsOpsApp() {
                     目标人群
                     <input
                       className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                      name="audience"
+                      required
                       value={accountAudience}
                       onChange={(event) => setAccountAudience(event.target.value)}
                     />
@@ -477,6 +502,8 @@ export function XhsOpsApp() {
                     差异化承诺
                     <textarea
                       className="min-h-20 rounded-md border border-[#CFC7B5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
+                      name="differentiator"
+                      required
                       value={differentiator}
                       onChange={(event) => setDifferentiator(event.target.value)}
                     />
@@ -485,12 +512,14 @@ export function XhsOpsApp() {
                     账号语气
                     <input
                       className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                      name="tone"
+                      required
                       value={accountTone}
                       onChange={(event) => setAccountTone(event.target.value)}
                     />
                   </label>
                 </div>
-              </div>
+              </form>
 
               <div className="grid gap-4">
                 <div className="rounded-lg border border-[#D8D2C1] bg-white p-5">

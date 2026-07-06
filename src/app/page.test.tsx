@@ -3,14 +3,20 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Home from "./page";
 
+async function renderHome(
+  searchParams: Promise<Record<string, string | string[] | undefined>> = Promise.resolve({})
+) {
+  render(await Home({ searchParams }));
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window.navigator, "share");
 });
 
 describe("home dashboard", () => {
-  it("renders the xhs operation workspaces without the scaffold content", () => {
-    render(<Home />);
+  it("renders the xhs operation workspaces without the scaffold content", async () => {
+    await renderHome();
 
     expect(screen.getByRole("heading", { name: "小红书运营工作台" })).toBeInTheDocument();
     expect(screen.getByText("Account Positioning")).toBeInTheDocument();
@@ -23,9 +29,30 @@ describe("home dashboard", () => {
     expect(screen.queryByText(/To get started/)).not.toBeInTheDocument();
   });
 
+  it("renders generated positioning from query params for no-js form submissions", async () => {
+    await renderHome(
+      Promise.resolve({
+        subjectArea: "家居收纳",
+        audience: "租房党和小户型新手",
+        differentiator: "把空间改造拆成低预算、可复用的清单",
+        tone: "实用、清爽、像朋友提醒",
+      })
+    );
+
+    expect(screen.getByRole("form", { name: "账号定位生成" })).toHaveAttribute("method", "get");
+    expect(screen.getByRole("button", { name: "生成定位" })).toHaveAttribute(
+      "form",
+      "positioning-form"
+    );
+    expect(screen.getByLabelText("账号主体区")).toHaveValue("家居收纳");
+    expect(screen.getAllByRole("heading", { name: "家居收纳自查室" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/租房党和小户型新手/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/低预算、可复用/).length).toBeGreaterThan(0);
+  });
+
   it("keeps benchmark subject filters usable after generating a custom account positioning", async () => {
     const user = userEvent.setup();
-    render(<Home />);
+    await renderHome();
 
     await user.clear(screen.getByLabelText("账号主体区"));
     await user.type(screen.getByLabelText("账号主体区"), "家居收纳");
@@ -74,7 +101,7 @@ describe("home dashboard", () => {
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<Home />);
+    await renderHome();
 
     await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
     await user.clear(screen.getByLabelText("账号主体区"));
@@ -138,7 +165,7 @@ describe("home dashboard", () => {
       };
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<Home />);
+    await renderHome();
 
     await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
     await user.clear(screen.getByLabelText("选题关键词"));
@@ -177,7 +204,7 @@ describe("home dashboard", () => {
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<Home />);
+    await renderHome();
 
     await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
     await user.click(screen.getByRole("button", { name: "生成海报" }));
@@ -202,7 +229,7 @@ describe("home dashboard", () => {
       value: shareMock,
       configurable: true,
     });
-    render(<Home />);
+    await renderHome();
 
     await user.click(screen.getByRole("button", { name: "手机分享" }));
 
