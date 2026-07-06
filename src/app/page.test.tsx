@@ -86,6 +86,15 @@ describe("home dashboard", () => {
     expect(screen.getByText("Image gpt-image-2")).toBeInTheDocument();
   });
 
+  it("shows OpenAI connection settings on the first screen before switching generation modes", async () => {
+    await renderHome();
+
+    expect(screen.getByLabelText("OpenAI 连接方式")).toBeInTheDocument();
+    expect(screen.getByLabelText("OpenAI API Key")).toBeInTheDocument();
+    expect(screen.getByLabelText("OpenAI Base URL")).toHaveValue("https://api.openai.com/v1");
+    expect(screen.getByRole("button", { name: "保存 OpenAI 设置" })).toBeInTheDocument();
+  });
+
   it("saves project settings locally and applies custom forbidden words to compliance checks", async () => {
     const user = userEvent.setup();
     await renderHome();

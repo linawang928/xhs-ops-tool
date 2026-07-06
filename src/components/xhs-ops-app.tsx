@@ -1803,12 +1803,11 @@ export function XhsOpsApp({
               {aiStatus}
             </div>
           </div>
-          {generationMode === "openai" && (
-            <form
-              aria-label="OpenAI 设置"
-              className="grid gap-3 rounded-md border border-[#D8D2C1] bg-white p-3 lg:grid-cols-[180px_minmax(220px,1fr)_minmax(220px,1fr)_140px_150px_auto]"
-              onSubmit={handleSaveOpenAiSettings}
-            >
+          <form
+            aria-label="OpenAI 设置"
+            className="grid gap-3 rounded-md border border-[#D8D2C1] bg-white p-3 lg:grid-cols-[180px_minmax(220px,1fr)_minmax(220px,1fr)_140px_150px_auto]"
+            onSubmit={handleSaveOpenAiSettings}
+          >
               <label className="grid gap-1 text-xs font-semibold uppercase text-[#6D6A61]">
                 OpenAI 连接方式
                 <select
@@ -1872,8 +1871,7 @@ export function XhsOpsApp({
                 </button>
                 <span className="text-xs font-medium text-[#6D6A61]">{openAiSettingsStatus}</span>
               </div>
-            </form>
-          )}
+          </form>
           <div className="grid gap-3 rounded-md border border-[#D8D2C1] bg-white p-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
