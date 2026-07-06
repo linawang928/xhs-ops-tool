@@ -6,6 +6,97 @@ function idFor(prefix: string, value: string, index = 0) {
   return `${prefix}-${value.replace(/\s+/g, "-").toLowerCase()}-${index + 1}`;
 }
 
+function parseDelimitedLine(line: string, delimiter: string) {
+  if (!delimiter) return [line.trim()];
+
+  const fields: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === delimiter && !inQuotes) {
+      fields.push(field.trim());
+      field = "";
+      continue;
+    }
+
+    field += char;
+  }
+
+  fields.push(field.trim());
+  return fields;
+}
+
+function delimiterFor(line: string) {
+  if (line.includes("\t")) return "\t";
+  if (line.includes(",")) return ",";
+  return "";
+}
+
+function normalizeHeader(header: string) {
+  return header.trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function headerKeyFor(header: string) {
+  const normalized = normalizeHeader(header);
+  const headerMap: Record<string, string[]> = {
+    title: ["title", "topic", "note", "notetitle", "标题", "笔记标题", "选题", "选题标题"],
+    keyword: ["keyword", "keywords", "关键词", "关键字"],
+    likes: ["likes", "like", "liked", "点赞", "点赞数", "赞"],
+    saves: ["saves", "save", "saved", "favorites", "收藏", "收藏数"],
+    comments: ["comments", "comment", "评论", "评论数"],
+    angle: ["angle", "contentangle", "角度", "选题角度", "内容角度"],
+    tags: ["tags", "tag", "hashtags", "标签", "话题", "话题标签"],
+  };
+
+  return Object.entries(headerMap).find(([, aliases]) => aliases.includes(normalized))?.[0];
+}
+
+function parseMetric(value: string | undefined) {
+  const raw = String(value ?? "").trim().replace(/,/g, "");
+  const match = raw.match(/^(\d+(?:\.\d+)?)(w|万|k|千)?$/i);
+  if (!match) return 0;
+
+  const amount = Number(match[1]);
+  const unit = match[2]?.toLowerCase();
+  const multiplier = unit === "w" || unit === "万" ? 10000 : unit === "k" || unit === "千" ? 1000 : 1;
+
+  return Math.max(0, Math.round(amount * multiplier));
+}
+
+function isHeaderRow(fields: string[]) {
+  const keys = fields.map(headerKeyFor).filter((key): key is string => Boolean(key));
+  return keys.includes("title") || keys.some((key) => ["likes", "saves", "comments", "angle"].includes(key));
+}
+
+function fieldIndexMap(headers: string[]) {
+  return headers.reduce<Record<string, number>>((map, header, index) => {
+    const key = headerKeyFor(header);
+    if (key && map[key] === undefined) {
+      map[key] = index;
+    }
+    return map;
+  }, {});
+}
+
+function valueAt(fields: string[], indexes: Record<string, number>, key: string, fallbackIndex: number) {
+  const index = indexes[key] ?? fallbackIndex;
+  return fields[index]?.trim() ?? "";
+}
+
 export function scoreTopicCandidate(candidate: TopicCandidate): {
   score: number;
   reasons: string[];
@@ -40,6 +131,52 @@ export function rankTopicCandidates(candidates: TopicCandidate[]) {
       return { ...candidate, score: scored.score, reasons: scored.reasons };
     })
     .sort((a, b) => b.score - a.score);
+}
+
+export function parseImportedTopicRows(input: string, project: Project, fallbackKeyword: string): TopicCandidate[] {
+  const rows = input
+    .split(/\r?\n/)
+    .map((row) => row.trim())
+    .filter(Boolean);
+
+  if (rows.length === 0) return [];
+
+  const delimiter = delimiterFor(rows[0]);
+  const firstFields = parseDelimitedLine(rows[0], delimiter);
+  const hasHeader = isHeaderRow(firstFields);
+  const indexes = hasHeader ? fieldIndexMap(firstFields) : {};
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  const cleanFallbackKeyword = fallbackKeyword.trim() || project.industry;
+  const candidates: TopicCandidate[] = [];
+
+  dataRows.forEach((row, index) => {
+    const rowDelimiter = delimiter || delimiterFor(row);
+    const fields = parseDelimitedLine(row, rowDelimiter);
+    const title = valueAt(fields, indexes, "title", 0);
+    const keyword = valueAt(fields, indexes, "keyword", -1) || cleanFallbackKeyword;
+    const angle = valueAt(fields, indexes, "angle", 4) || "手动导入";
+
+    if (!title) return;
+
+    candidates.push({
+      id: idFor("topic-import", `${project.id}-${keyword}-${title}`, index),
+      projectId: project.id,
+      keyword,
+      title,
+      angle,
+      source: "manual-import",
+      score: 0,
+      status: "candidate",
+      metrics: {
+        likes: parseMetric(valueAt(fields, indexes, "likes", 1)),
+        saves: parseMetric(valueAt(fields, indexes, "saves", 2)),
+        comments: parseMetric(valueAt(fields, indexes, "comments", 3)),
+      },
+      reasons: [],
+    });
+  });
+
+  return rankTopicCandidates(candidates);
 }
 
 export function generateTopicCandidates(keyword: string, project: Project): TopicCandidate[] {

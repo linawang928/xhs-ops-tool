@@ -439,6 +439,28 @@ describe("home dashboard", () => {
     expect(await screen.findByText("租房收纳别乱买，先做这 4 步")).toBeInTheDocument();
   });
 
+  it("imports hot topic rows into the topic pool and uses one for draft generation", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.clear(screen.getByLabelText("选题关键词"));
+    await user.type(screen.getByLabelText("选题关键词"), "租房收纳");
+    await user.clear(screen.getByLabelText("爆款数据导入"));
+    await user.type(
+      screen.getByLabelText("爆款数据导入"),
+      "标题,点赞,收藏,评论,角度\n租房收纳入口区避坑清单,4200,2800,188,痛点清单"
+    );
+    await user.click(screen.getByRole("button", { name: "导入爆款数据" }));
+
+    expect(screen.getByText("已导入 1 条爆款选题")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /租房收纳入口区避坑清单/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /租房收纳入口区避坑清单/ }));
+    await user.click(screen.getByRole("button", { name: "生成" }));
+
+    expect(screen.getByLabelText("笔记标题")).toHaveValue("租房收纳入口区避坑清单");
+  });
+
   it("uses OpenAI to analyze benchmark notes in OpenAI mode", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {

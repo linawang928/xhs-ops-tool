@@ -49,7 +49,7 @@ import {
   type MobilePublishCardPayload,
 } from "@/lib/core/publish-card";
 import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/publish";
-import { generateTopicCandidates } from "@/lib/core/topic";
+import { generateTopicCandidates, parseImportedTopicRows } from "@/lib/core/topic";
 import type {
   AccountHomepageAnalysis,
   AccountHomepageInput,
@@ -151,6 +151,7 @@ interface StoredWorkspaceSnapshot extends PositioningWorkspace {
   homepageAnalysis: AccountHomepageAnalysis | null;
   benchmarkSubjectArea: string;
   benchmarkFormat: BenchmarkContentFormat;
+  rawTopicImportText?: string;
   selectedTopicId: string;
   rawBenchmarkText: string;
   draftHashtagInput: string;
@@ -1061,6 +1062,9 @@ export function XhsOpsApp({
   );
   const [keyword, setKeyword] = useState(initialWorkspace.keyword);
   const [topics, setTopics] = useState<TopicCandidate[]>(initialWorkspace.topics);
+  const [rawTopicImportText, setRawTopicImportText] = useState(
+    storedWorkspaceAtRender?.rawTopicImportText ?? ""
+  );
   const [selectedTopicId, setSelectedTopicId] = useState(
     storedWorkspaceAtRender?.selectedTopicId ?? initialWorkspace.topics[0].id
   );
@@ -1152,6 +1156,7 @@ export function XhsOpsApp({
       benchmarkFormat,
       keyword,
       topics,
+      rawTopicImportText,
       selectedTopicId,
       rawBenchmarkText,
       benchmark,
@@ -1180,6 +1185,7 @@ export function XhsOpsApp({
     publishTask,
     rawBenchmarkText,
     rawHomepageText,
+    rawTopicImportText,
     scanText,
     selectedTopicId,
     subjectArea,
@@ -1201,6 +1207,7 @@ export function XhsOpsApp({
     setBenchmarkFormat(snapshot.benchmarkFormat);
     setKeyword(snapshot.keyword);
     setTopics(snapshot.topics);
+    setRawTopicImportText(snapshot.rawTopicImportText ?? "");
     setSelectedTopicId(snapshot.selectedTopicId);
     setRawBenchmarkText(snapshot.rawBenchmarkText);
     setBenchmark(snapshot.benchmark);
@@ -1288,6 +1295,7 @@ export function XhsOpsApp({
     setBenchmarkFormat("全部");
     setKeyword(nextWorkspace.keyword);
     setTopics(nextWorkspace.topics);
+    setRawTopicImportText("");
     setSelectedTopicId(nextWorkspace.topics[0].id);
     setRawBenchmarkText(nextWorkspace.benchmark.body);
     setBenchmark(nextWorkspace.benchmark);
@@ -1595,6 +1603,26 @@ export function XhsOpsApp({
     } finally {
       setIsGeneratingTopics(false);
     }
+  }
+
+  function handleImportTopics() {
+    const importedTopics = parseImportedTopicRows(rawTopicImportText, project, keyword);
+
+    if (importedTopics.length === 0) {
+      setAiStatus("没有可导入的爆款数据");
+      return;
+    }
+
+    const importedTitles = new Set(importedTopics.map((topic) => topic.title.trim()));
+    setTopics((currentTopics) => [
+      ...importedTopics,
+      ...currentTopics.filter((topic) => !importedTitles.has(topic.title.trim())),
+    ]);
+    setSelectedTopicId(importedTopics[0].id);
+    if (!keyword.trim()) {
+      setKeyword(importedTopics[0].keyword);
+    }
+    setAiStatus(`已导入 ${importedTopics.length} 条爆款选题`);
   }
 
   function currentRawBenchmarkNote(): RawBenchmarkNote {
@@ -2348,6 +2376,32 @@ export function XhsOpsApp({
                 </div>
               }
             />
+            <div className="mb-4 grid gap-3 rounded-lg border border-[#D8D2C1] bg-white p-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+              <label className="grid gap-2 text-xs font-semibold uppercase text-[#6D6A61]">
+                爆款数据导入
+                <textarea
+                  className="min-h-28 rounded-md border border-[#CFC7B5] bg-[#FCFAF3] p-3 text-sm font-normal normal-case leading-6 text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                  value={rawTopicImportText}
+                  onChange={(event) => setRawTopicImportText(event.target.value)}
+                  placeholder={"标题,点赞,收藏,评论,角度\n租房收纳入口区避坑清单,4200,2800,188,痛点清单"}
+                  aria-label="爆款数据导入"
+                />
+              </label>
+              <div className="flex flex-col justify-end gap-3">
+                <div className="rounded-md bg-[#F8F3E7] px-3 py-2 text-xs leading-5 text-[#6D6A61]">
+                  CSV / TSV / 一行一个标题
+                </div>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white disabled:opacity-60"
+                  onClick={handleImportTopics}
+                  type="button"
+                  disabled={!rawTopicImportText.trim()}
+                >
+                  <Upload size={16} />
+                  导入爆款数据
+                </button>
+              </div>
+            </div>
             <div className="grid gap-3 lg:grid-cols-2">
               {topics.map((topic) => (
                 <button

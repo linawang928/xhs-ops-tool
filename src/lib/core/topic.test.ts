@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateTopicCandidates, rankTopicCandidates } from "./topic";
+import { generateTopicCandidates, parseImportedTopicRows, rankTopicCandidates } from "./topic";
 import type { Project } from "./types";
 
 const project: Project = {
@@ -59,5 +59,46 @@ describe("topic lab", () => {
     expect(ranked[0].id).toBe("high");
     expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
     expect(ranked[0].reasons).toContain("收藏权重高");
+  });
+
+  it("parses imported hot-topic rows from CSV data into scored manual candidates", () => {
+    const candidates = parseImportedTopicRows(
+      [
+        "标题,点赞,收藏,评论,角度,标签",
+        "敏感肌屏障修护避坑清单,2600,1800,146,痛点清单,敏感肌|屏障修护",
+        "早八通勤护肤流程,900,640,53,步骤模板,通勤 护肤",
+      ].join("\n"),
+      project,
+      "敏感肌"
+    );
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toMatchObject({
+      projectId: project.id,
+      keyword: "敏感肌",
+      title: "敏感肌屏障修护避坑清单",
+      angle: "痛点清单",
+      source: "manual-import",
+      status: "candidate",
+      metrics: { likes: 2600, saves: 1800, comments: 146 },
+    });
+    expect(candidates[0].score).toBeGreaterThan(candidates[1].score);
+    expect(candidates[0].reasons).toContain("收藏权重高");
+  });
+
+  it("parses newline-only imported titles with safe fallback metrics", () => {
+    const candidates = parseImportedTopicRows(
+      "敏感肌换季自查表\n屏障修护别乱叠产品",
+      project,
+      "敏感肌"
+    );
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toMatchObject({
+      keyword: "敏感肌",
+      angle: "手动导入",
+      source: "manual-import",
+      metrics: { likes: 0, saves: 0, comments: 0 },
+    });
   });
 });
