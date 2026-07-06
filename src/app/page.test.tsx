@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "./page";
@@ -512,35 +512,48 @@ describe("home dashboard", () => {
     expect(screen.getByText(/#租房收纳 #入口区整理/)).toBeInTheDocument();
   });
 
-  it("generates and previews an OpenAI poster image", async () => {
+  it("generates and previews OpenAI poster images for every draft card", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        image: {
-          url: "data:image/png;base64,poster-base64",
-          alt: "xhs cover poster",
-          cardId: "draft-topic-ai-card-1",
-        },
-      }),
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/ai/status/") {
+        return {
+          ok: true,
+          json: async () => ({ serverApiAvailable: true, hasOpenAIKey: true }),
+        };
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { cardId?: string };
+      const callIndex = fetchMock.mock.calls.filter(([callUrl]) => callUrl === "/api/ai/poster/").length;
+      return {
+        ok: true,
+        json: async () => ({
+          image: {
+            id: `poster-${callIndex}`,
+            url: `data:image/png;base64,poster-base64-${callIndex}`,
+            alt: `xhs poster ${callIndex}`,
+            cardId: body.cardId,
+            draftId: "draft-topic-ai",
+            source: "openai",
+            fileName: `xhs-ai-poster-${callIndex}.png`,
+            mimeType: "image/png",
+            width: 1024,
+            height: 1536,
+          },
+        }),
+      };
     });
     vi.stubGlobal("fetch", fetchMock);
     await renderHome();
 
+    const cardCount = screen.getAllByLabelText(/卡片标题/).length;
     await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
     await user.click(screen.getByRole("button", { name: "生成海报" }));
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/ai/poster/",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining("assetCards"),
-      })
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/ai/poster/")).toHaveLength(cardCount)
     );
-    expect(await screen.findByRole("img", { name: "xhs cover poster" })).toHaveAttribute(
-      "src",
-      "data:image/png;base64,poster-base64"
-    );
+    expect(await screen.findAllByRole("img", { name: /xhs poster/ })).toHaveLength(cardCount);
+    expect(screen.getAllByText("xhs-ai-poster-1.png").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`xhs-ai-poster-${cardCount}.png`).length).toBeGreaterThan(0);
   });
 
   it("saves browser OpenAI settings separately and keeps the API key out of workspace exports", async () => {
@@ -589,6 +602,7 @@ describe("home dashboard", () => {
     vi.stubGlobal("fetch", fetchMock);
     await renderHome();
 
+    const cardCount = screen.getAllByLabelText(/卡片标题/).length;
     await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
     await user.selectOptions(screen.getByLabelText("OpenAI 连接方式"), "browser");
     await user.clear(screen.getByLabelText("OpenAI API Key"));
@@ -598,6 +612,11 @@ describe("home dashboard", () => {
     await user.click(screen.getByRole("button", { name: "保存 OpenAI 设置" }));
     await user.click(screen.getByRole("button", { name: "生成海报" }));
 
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => url === "https://api.openai.test/v1/images/generations")
+      ).toHaveLength(cardCount)
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.openai.test/v1/images/generations",
       expect.objectContaining({
@@ -610,10 +629,9 @@ describe("home dashboard", () => {
       "/api/ai/poster/",
       expect.objectContaining({ method: "POST" })
     );
-    expect(await screen.findByRole("img", { name: "browser xhs poster" })).toHaveAttribute(
-      "src",
-      "data:image/png;base64,browser-poster-base64"
-    );
+    const browserPosters = await screen.findAllByRole("img", { name: "browser xhs poster" });
+    expect(browserPosters).toHaveLength(cardCount);
+    expect(browserPosters[0]).toHaveAttribute("src", "data:image/png;base64,browser-poster-base64");
   });
 
   it("generates downloadable template poster images in local mode", async () => {

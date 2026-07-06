@@ -1652,35 +1652,36 @@ export function XhsOpsApp({
     }
 
     setIsGeneratingPoster(true);
-    setAiStatus("OpenAI 正在生成海报");
+    setAiStatus("OpenAI 正在生成整组海报");
     try {
-      const image = shouldUseBrowserOpenAi()
-        ? await generateXhsPosterWithOpenAI({
-            project,
-            draft,
-            cardId: draft.assetCards[0]?.id,
-            settings: currentOpenAiSettings(),
-          })
-        : (
-            await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
-              project,
-              draft,
-              cardId: draft.assetCards[0]?.id,
-            })
-          ).image;
-      setPosterImages((images) => {
-        const nextImages = [
-          image,
-          ...images.filter((item) => item.cardId !== image.cardId),
-        ].slice(0, 4);
-        setPublishTask((task) => ({
-          ...task,
-          assetManifest: posterAssetsToManifest(nextImages),
-          updatedAt: new Date().toISOString(),
-        }));
-        return nextImages;
-      });
-      setAiStatus(shouldUseBrowserOpenAi() ? "浏览器 OpenAI 已生成海报" : "OpenAI 已生成海报");
+      const useBrowserOpenAi = shouldUseBrowserOpenAi();
+      const settings = useBrowserOpenAi ? currentOpenAiSettings() : undefined;
+      const cardIds = draft.assetCards.length > 0 ? draft.assetCards.map((card) => card.id) : [undefined];
+      const images = await Promise.all(
+        cardIds.map(async (cardId) =>
+          useBrowserOpenAi
+            ? generateXhsPosterWithOpenAI({
+                project,
+                draft,
+                cardId,
+                settings,
+              })
+            : (
+                await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
+                  project,
+                  draft,
+                  cardId,
+                })
+              ).image
+        )
+      );
+
+      syncPosterAssets(images);
+      setAiStatus(
+        useBrowserOpenAi
+          ? `浏览器 OpenAI 已生成 ${images.length} 张海报`
+          : `OpenAI 已生成 ${images.length} 张海报`
+      );
     } catch (error) {
       const templatePosters = createTemplatePosterAssets(draft, project);
       syncPosterAssets(templatePosters);
