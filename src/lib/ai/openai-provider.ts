@@ -124,7 +124,7 @@ export async function generatePosterImage(input: PosterImageInput): Promise<{ ur
       model: input.model ?? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2",
       prompt: input.prompt,
       size: imageSizeFor(input.aspectRatio),
-      response_format: "b64_json",
+      output_format: "png",
     }),
   });
 

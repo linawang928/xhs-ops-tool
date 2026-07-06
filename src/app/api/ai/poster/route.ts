@@ -24,6 +24,11 @@ function selectCard(draft: ContentDraft, cardId?: string): AssetCard {
   return draft.assetCards.find((card) => card.id === cardId) ?? draft.assetCards[0];
 }
 
+function cardIndex(draft: ContentDraft, card: AssetCard) {
+  const index = draft.assetCards.findIndex((item) => item.id === card.id);
+  return index >= 0 ? index + 1 : 1;
+}
+
 function posterPrompt(project: Project, draft: ContentDraft, card: AssetCard) {
   return [
     "生成一张小红书图文封面海报，竖版 3:4，中文排版清晰，适合手机首屏。",
@@ -50,8 +55,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       image: {
+        id: `openai-${card.id}`,
         ...image,
         cardId: card.id,
+        draftId: input.draft.id,
+        source: "openai",
+        fileName: `xhs-ai-poster-${cardIndex(input.draft, card)}.png`,
+        mimeType: "image/png",
+        width: 1024,
+        height: 1536,
       },
     });
   } catch (error) {

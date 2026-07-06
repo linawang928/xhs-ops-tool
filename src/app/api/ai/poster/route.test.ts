@@ -37,10 +37,17 @@ describe("POST /api/ai/poster", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.image).toEqual({
+    expect(payload.image).toMatchObject({
+      id: `openai-${demoDraft.assetCards[0].id}`,
       url: "data:image/png;base64,poster-base64",
       alt: "xhs cover poster",
       cardId: demoDraft.assetCards[0].id,
+      draftId: demoDraft.id,
+      source: "openai",
+      fileName: "xhs-ai-poster-1.png",
+      mimeType: "image/png",
+      width: 1024,
+      height: 1536,
     });
     expect(fetchMock.mock.calls[0][1].body).toContain("小红书图文封面");
     expect(fetchMock.mock.calls[0][1].body).toContain(demoDraft.assetCards[0].title);

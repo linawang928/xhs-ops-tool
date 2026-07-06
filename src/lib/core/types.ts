@@ -175,6 +175,21 @@ export interface AssetCard {
   themeColor: string;
 }
 
+export type PosterAssetSource = "template" | "openai";
+
+export interface GeneratedPosterAsset {
+  id: string;
+  cardId: string;
+  draftId: string;
+  source: PosterAssetSource;
+  url: string;
+  alt: string;
+  fileName: string;
+  mimeType: "image/svg+xml" | "image/png";
+  width: number;
+  height: number;
+}
+
 export interface ContentDraft {
   id: string;
   projectId: string;
@@ -197,6 +212,13 @@ export interface PublishTask {
   publisherMode: "manual";
   officialPublishUrl: string;
   checklist: string[];
+  assetManifest: Array<{
+    cardId: string;
+    fileName: string;
+    mimeType: string;
+    source: PosterAssetSource;
+    description: string;
+  }>;
   exportText: string;
   createdAt: string;
   updatedAt: string;

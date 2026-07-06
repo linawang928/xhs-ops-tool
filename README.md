@@ -7,8 +7,9 @@
 - Benchmark Lab：导入对标笔记正文并拆解结构、标签、卖点和互动钩子
 - Benchmark Filter：根据账号主体区和内容形式筛选对标内容
 - Content Studio：基于选题和对标上下文生成标题、正文、话题和模板卡片脚本
+- Poster Studio：本地生成 3:4 SVG 模板海报；OpenAI 模式调用 GPT Image 2 生成 PNG 海报
 - Compliance Guard：检测极限词、导流词、虚假承诺、医疗/金融敏感表达和项目禁用词
-- Publish Queue：生成半自动发布包、发布清单、排期和官方发布入口
+- Publish Queue：生成半自动发布包、素材清单、移动端分享、排期和官方发布入口
 
 ## 本地运行
 
@@ -34,7 +35,9 @@ pnpm dev
 - 账号定位：调用 `/api/ai/positioning`
 - 爆款选题：调用 `/api/ai/topics`
 - 图文文案：调用 `/api/ai/draft`
-- 海报图：调用 `/api/ai/poster`，返回浏览器可预览的 data URL
+- 海报图：调用 `/api/ai/poster`，使用 `gpt-image-2` 和 `output_format=png`，返回浏览器可预览、可下载的 data URL
+
+没有 API Key 时也可以点击“生成海报”，系统会使用本地 SVG 模板为每张卡片生成 3:4 海报，并同步到发布包的素材清单。
 
 GitHub Pages 只能托管静态页面，不能保存 API Key 或执行服务端 GPT 调用。真实 GPT 生成请用本地 `pnpm dev`，线上 Pages 版本保留工作台界面和本地模板 fallback。
 

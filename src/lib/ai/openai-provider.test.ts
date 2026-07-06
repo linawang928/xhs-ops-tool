@@ -93,6 +93,13 @@ describe("openai provider", () => {
         body: expect.stringContaining('"model":"gpt-image-2"'),
       })
     );
-    expect(fetcher.mock.calls[0][1].body).toContain('"size":"1024x1536"');
+    const body = JSON.parse(String(fetcher.mock.calls[0][1].body));
+    expect(body).toMatchObject({
+      model: "gpt-image-2",
+      prompt: "生成小红书封面海报",
+      size: "1024x1536",
+      output_format: "png",
+    });
+    expect(body).not.toHaveProperty("response_format");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { prepareManualPublishPackage, transitionPublishTask } from "./publish";
-import type { ContentDraft, Project, PublishTask } from "./types";
+import type { ContentDraft, GeneratedPosterAsset, Project, PublishTask } from "./types";
 
 const project: Project = {
   id: "project-1",
@@ -54,6 +54,41 @@ describe("publish queue", () => {
     expect(task.checklist).toContain("人工复核敏感词和导流表达");
     expect(task.exportText).toContain(draft.selectedTitle);
     expect(task.exportText).toContain("#敏感肌");
+  });
+
+  it("includes generated poster assets in the publish package manifest", () => {
+    const posterAssets: GeneratedPosterAsset[] = [
+      {
+        id: "poster-card-1",
+        cardId: "card-1",
+        draftId: "draft-1",
+        source: "template",
+        url: "data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C/svg%3E",
+        alt: "敏感肌修护封面",
+        fileName: "xhs-poster-1.svg",
+        mimeType: "image/svg+xml",
+        width: 1080,
+        height: 1440,
+      },
+    ];
+
+    const task = prepareManualPublishPackage(
+      draft,
+      project,
+      "2026-07-07T12:30:00.000Z",
+      posterAssets
+    );
+
+    expect(task.assetManifest).toEqual([
+      {
+        cardId: "card-1",
+        fileName: "xhs-poster-1.svg",
+        mimeType: "image/svg+xml",
+        source: "template",
+        description: "敏感肌修护封面",
+      },
+    ]);
+    expect(task.checklist).toContain("确认已下载或分享所有海报素材");
   });
 
   it("only allows publish tasks to move through the manual workflow order", () => {

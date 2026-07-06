@@ -27,6 +27,7 @@ import {
 import { analyzeBenchmarkNote } from "@/lib/core/benchmark";
 import { scanCompliance } from "@/lib/core/compliance";
 import { generateDraftFromTopic } from "@/lib/core/content";
+import { createTemplatePosterAssets } from "@/lib/core/poster-template";
 import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/publish";
 import { generateTopicCandidates } from "@/lib/core/topic";
 import type {
@@ -37,6 +38,7 @@ import type {
   BenchmarkContentFormat,
   BenchmarkNote,
   ContentDraft,
+  GeneratedPosterAsset,
   PublishTask,
   TopicCandidate,
 } from "@/lib/core/types";
@@ -52,12 +54,6 @@ import {
 } from "@/lib/sample-data";
 
 type GenerationMode = "local" | "openai";
-
-interface GeneratedPoster {
-  url: string;
-  alt: string;
-  cardId: string;
-}
 
 interface XhsOpsAppProps {
   initialPositioningInput?: AccountPositioningInput;
@@ -106,6 +102,22 @@ function parseHomepageText(rawText: string, projectId: string): AccountHomepageI
     bio: lines[1] ?? lines[0] ?? "未填写简介",
     recentNotesText: lines.slice(2).join("\n") || lines.join("\n") || "未提供近期笔记",
   };
+}
+
+function posterAssetsToManifest(assets: GeneratedPosterAsset[]): PublishTask["assetManifest"] {
+  return assets.map((asset) => ({
+    cardId: asset.cardId,
+    fileName: asset.fileName,
+    mimeType: asset.mimeType,
+    source: asset.source,
+    description: asset.alt,
+  }));
+}
+
+async function posterAssetToFile(asset: GeneratedPosterAsset) {
+  const response = await fetch(asset.url);
+  const blob = await response.blob();
+  return new File([blob], asset.fileName, { type: asset.mimeType });
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -191,7 +203,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
-  const [posterImages, setPosterImages] = useState<GeneratedPoster[]>([]);
+  const [posterImages, setPosterImages] = useState<GeneratedPosterAsset[]>([]);
   const [subjectArea, setSubjectArea] = useState(initialPositioning.subjectArea);
   const [accountAudience, setAccountAudience] = useState(initialPositioning.audience);
   const [differentiator, setDifferentiator] = useState(initialPositioning.differentiator);
@@ -254,6 +266,15 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     setAccountPositioning(nextPositioning);
     setBenchmarkSubjectArea(nextPositioning.benchmarkFilters.subjectArea);
     setBenchmarkFormat("全部");
+  }
+
+  function syncPosterAssets(nextAssets: GeneratedPosterAsset[]) {
+    setPosterImages(nextAssets);
+    setPublishTask((task) => ({
+      ...task,
+      assetManifest: posterAssetsToManifest(nextAssets),
+      updatedAt: new Date().toISOString(),
+    }));
   }
 
   async function handleGeneratePositioning() {
@@ -439,22 +460,41 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
 
   async function handleGeneratePoster() {
     if (generationMode !== "openai") {
-      setAiStatus("生成海报需要 OpenAI 模式");
+      const templatePosters = createTemplatePosterAssets(draft, demoProject);
+      syncPosterAssets(templatePosters);
+      setAiStatus("本地模板已生成海报");
       return;
     }
 
     setIsGeneratingPoster(true);
     setAiStatus("OpenAI 正在生成海报");
     try {
-      const payload = await postJson<{ image: GeneratedPoster }>("/api/ai/poster/", {
+      const payload = await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
         project: demoProject,
         draft,
         cardId: draft.assetCards[0]?.id,
       });
-      setPosterImages((images) => [payload.image, ...images].slice(0, 4));
+      setPosterImages((images) => {
+        const nextImages = [
+          payload.image,
+          ...images.filter((image) => image.cardId !== payload.image.cardId),
+        ].slice(0, 4);
+        setPublishTask((task) => ({
+          ...task,
+          assetManifest: posterAssetsToManifest(nextImages),
+          updatedAt: new Date().toISOString(),
+        }));
+        return nextImages;
+      });
       setAiStatus("OpenAI 已生成海报");
     } catch (error) {
-      setAiStatus(error instanceof Error ? `OpenAI 图片不可用：${error.message}` : "OpenAI 图片不可用");
+      const templatePosters = createTemplatePosterAssets(draft, demoProject);
+      syncPosterAssets(templatePosters);
+      setAiStatus(
+        error instanceof Error
+          ? `OpenAI 图片不可用：${error.message}，已生成模板海报`
+          : "OpenAI 图片不可用，已生成模板海报"
+      );
     } finally {
       setIsGeneratingPoster(false);
     }
@@ -474,7 +514,22 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
   async function handleSharePackage() {
     const title = publishTask.exportText.split("\n")[0] ?? draft.selectedTitle;
     if (typeof navigator !== "undefined" && "share" in navigator) {
-      await navigator.share({
+      const nav = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean;
+      };
+      const posterFiles =
+        posterImages.length > 0 ? await Promise.all(posterImages.slice(0, 4).map(posterAssetToFile)) : [];
+      if (posterFiles.length > 0 && nav.canShare?.({ files: posterFiles })) {
+        await nav.share({
+          title,
+          text: publishTask.exportText,
+          files: posterFiles,
+        });
+        setShared(true);
+        return;
+      }
+
+      await nav.share({
         title,
         text: publishTask.exportText,
       });
@@ -984,17 +1039,31 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
                   <div className="rounded-lg border border-[#D8D2C1] bg-white p-3">
                     <p className="mb-3 text-xs font-semibold uppercase text-[#6D6A61]">Poster Preview</p>
                     <div className="grid gap-3">
-                      {posterImages.map((poster) => (
+                      {posterImages.map((poster) => {
+                        const fileName = poster.fileName ?? `${poster.cardId}.png`;
+                        return (
+                        <div key={poster.id ?? `${poster.cardId}-${poster.url.slice(-12)}`} className="grid gap-2">
                         <NextImage
-                          key={`${poster.cardId}-${poster.url.slice(-12)}`}
                           src={poster.url}
                           alt={poster.alt}
-                          width={512}
-                          height={768}
+                          width={poster.width ?? 1024}
+                          height={poster.height ?? 1536}
                           unoptimized
                           className="aspect-[3/4] w-full rounded-md border border-[#D8D2C1] object-cover"
                         />
-                      ))}
+                        <div className="flex items-center justify-between gap-2 text-xs text-[#6D6A61]">
+                          <span>{fileName}</span>
+                          <a
+                            className="inline-flex h-8 items-center rounded-md border border-[#D8D2C1] bg-[#FCFAF3] px-2 font-semibold text-[#214F45]"
+                            href={poster.url}
+                            download={fileName}
+                          >
+                            下载
+                          </a>
+                        </div>
+                        </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1128,6 +1197,24 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
                 <pre className="mt-5 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-[#1F2723] p-4 text-xs leading-5 text-[#FCFAF3]">
                   {publishTask.exportText}
                 </pre>
+                {publishTask.assetManifest.length > 0 && (
+                  <div className="mt-5 rounded-lg border border-[#D8D2C1] bg-white p-4">
+                    <p className="text-xs font-semibold uppercase text-[#6D6A61]">素材清单</p>
+                    <div className="mt-3 grid gap-2">
+                      {publishTask.assetManifest.map((asset) => (
+                        <div
+                          key={`${asset.cardId}-${asset.fileName}`}
+                          className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-[#F8F3E7] p-3 text-sm"
+                        >
+                          <span className="min-w-0 truncate">{asset.fileName}</span>
+                          <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs text-[#6D6A61]">
+                            {asset.source === "openai" ? "GPT" : "模板"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>

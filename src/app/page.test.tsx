@@ -270,6 +270,24 @@ describe("home dashboard", () => {
     );
   });
 
+  it("generates downloadable template poster images in local mode", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.click(screen.getByRole("button", { name: "生成海报" }));
+
+    const templatePosters = await screen.findAllByRole("img", { name: /模板海报/ });
+    expect(templatePosters[0]).toHaveAttribute(
+      "src",
+      expect.stringMatching(/^data:image\/svg\+xml/)
+    );
+    expect(screen.getAllByRole("link", { name: "下载" })[0]).toHaveAttribute(
+      "download",
+      expect.stringContaining("xhs-poster-1")
+    );
+    expect(screen.getByText("素材清单")).toBeInTheDocument();
+  });
+
   it("shares the publish package through the mobile Web Share API", async () => {
     const user = userEvent.setup();
     const shareMock = vi.fn().mockResolvedValue(undefined);
