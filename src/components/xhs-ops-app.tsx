@@ -142,8 +142,14 @@ export function XhsOpsApp() {
     [scanText]
   );
   const subjectAreaOptions = useMemo(
-    () => Array.from(new Set(demoBenchmarkCandidates.map((candidate) => candidate.subjectArea))),
-    []
+    () =>
+      Array.from(
+        new Set([
+          accountPositioning.subjectArea,
+          ...demoBenchmarkCandidates.map((candidate) => candidate.subjectArea),
+        ])
+      ),
+    [accountPositioning.subjectArea]
   );
   const contentFormatOptions = useMemo<BenchmarkContentFormat[]>(
     () => [
@@ -483,34 +489,40 @@ export function XhsOpsApp() {
                 </div>
               </div>
               <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                {filteredBenchmarkCandidates.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    onClick={() => handleUseBenchmarkCandidate(candidate.id)}
-                    className="rounded-lg border border-[#D8D2C1] bg-[#FCFAF3] p-4 text-left transition hover:border-[#2E6B5F]"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-[#E85D75]">
-                          {candidate.subjectArea} / {candidate.contentFormat}
-                        </p>
-                        <h4 className="mt-2 text-sm font-semibold leading-6 text-[#1F2723]">
-                          {candidate.title}
-                        </h4>
+                {filteredBenchmarkCandidates.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-[#CFC7B5] bg-[#FCFAF3] p-4 text-sm leading-6 text-[#6D6A61] xl:col-span-3">
+                    当前主体区还没有候选对标内容。可以先切换到已有主体区，或把同领域笔记粘贴到下方再拆解。
+                  </div>
+                ) : (
+                  filteredBenchmarkCandidates.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      onClick={() => handleUseBenchmarkCandidate(candidate.id)}
+                      className="rounded-lg border border-[#D8D2C1] bg-[#FCFAF3] p-4 text-left transition hover:border-[#2E6B5F]"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-[#E85D75]">
+                            {candidate.subjectArea} / {candidate.contentFormat}
+                          </p>
+                          <h4 className="mt-2 text-sm font-semibold leading-6 text-[#1F2723]">
+                            {candidate.title}
+                          </h4>
+                        </div>
+                        <ScoreBadge score={candidate.matchScore} />
                       </div>
-                      <ScoreBadge score={candidate.matchScore} />
-                    </div>
-                    <p className="mt-3 text-xs leading-5 text-[#6D6A61]">{candidate.audiencePain}</p>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {candidate.matchReasons.map((reason) => (
-                        <span key={reason} className="rounded bg-white px-2 py-1 text-xs text-[#214F45]">
-                          {reason}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                ))}
+                      <p className="mt-3 text-xs leading-5 text-[#6D6A61]">{candidate.audiencePain}</p>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {candidate.matchReasons.map((reason) => (
+                          <span key={reason} className="rounded bg-white px-2 py-1 text-xs text-[#214F45]">
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
             </div>
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
