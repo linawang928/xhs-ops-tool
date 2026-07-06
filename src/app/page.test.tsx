@@ -485,6 +485,12 @@ describe("home dashboard", () => {
   });
 
   it("opens a mobile publish card from the URL hash", async () => {
+    const user = userEvent.setup();
+    const clipboardMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText: clipboardMock },
+      configurable: true,
+    });
     const payload = {
       version: 1,
       title: "租房收纳别乱买，先做这 4 步",
@@ -504,6 +510,11 @@ describe("home dashboard", () => {
 
     expect(screen.getByRole("heading", { name: "手机发布卡" })).toBeInTheDocument();
     expect(screen.getByText("租房收纳别乱买，先做这 4 步")).toBeInTheDocument();
+    const copyAndOpen = screen.getByRole("link", { name: "复制并打开小红书" });
+    expect(copyAndOpen).toHaveAttribute("href", "xhsdiscover://post");
+    copyAndOpen.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    await user.click(copyAndOpen);
+    expect(clipboardMock).toHaveBeenCalledWith(payload.exportText);
     expect(screen.getByRole("link", { name: "打开小红书" })).toHaveAttribute("href", "xhsdiscover://post");
     expect(screen.getByRole("link", { name: "网页发布" })).toHaveAttribute(
       "href",

@@ -519,6 +519,16 @@ function MobilePublishCardView({ payload }: { payload: MobilePublishCardPayload 
               {sharedCard ? "已分享" : "系统分享"}
             </button>
             <a
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white"
+              href={payload.xhsAppPublishUrl}
+              onClick={() => {
+                void handleCopyCardText();
+              }}
+            >
+              <ClipboardCheck size={16} />
+              复制并打开小红书
+            </a>
+            <a
               className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#E85D75] px-3 text-sm font-semibold text-white"
               href={payload.xhsAppPublishUrl}
             >
