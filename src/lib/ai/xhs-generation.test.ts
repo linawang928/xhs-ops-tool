@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { demoBenchmark, demoDraft, demoProject, demoTopics } from "@/lib/sample-data";
+import { demoBenchmark, demoDraft, demoProject, demoRawBenchmark, demoTopics } from "@/lib/sample-data";
 import {
+  analyzeXhsBenchmarkWithOpenAI,
   generateXhsDraftWithOpenAI,
   generateXhsPosterWithOpenAI,
   generateXhsTopicsWithOpenAI,
@@ -108,6 +109,56 @@ describe("xhs OpenAI generation helpers", () => {
       title: "别急着买柜子",
     });
     expect(draft.compliance.riskLevel).toBe("low");
+  });
+
+  it("analyzes benchmark notes through OpenAI and preserves the imported note metadata", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        output_text: JSON.stringify({
+          title: "租房收纳别急着买柜子，先看这 5 个死角",
+          openingHook: "一开头先拦住冲动购买的人群。",
+          structure: ["痛点开场", "步骤清单", "互动收尾"],
+          tags: ["租房收纳", "小户型", "收纳避坑"],
+          sellingPoints: ["先看入口区", "再看柜内死角", "最后看预算"],
+          interactionCues: ["评论区补充你家最乱的位置"],
+        }),
+      })
+    );
+
+    const benchmark = await analyzeXhsBenchmarkWithOpenAI({
+      project: demoProject,
+      note: {
+        ...demoRawBenchmark,
+        id: "bench-ai-rent-storage",
+        title: "租房收纳别急着买柜子，先看这 5 个死角",
+      },
+      settings: {
+        apiKey: "sk-browser",
+        baseUrl: "https://api.openai.test/v1",
+        textModel: "gpt-5.5",
+      },
+      fetcher,
+    });
+
+    expect(benchmark).toMatchObject({
+      id: "bench-ai-rent-storage",
+      projectId: demoProject.id,
+      title: "租房收纳别急着买柜子，先看这 5 个死角",
+      analysis: {
+        openingHook: "一开头先拦住冲动购买的人群。",
+        structure: ["痛点开场", "步骤清单", "互动收尾"],
+        tags: ["租房收纳", "小户型", "收纳避坑"],
+        sellingPoints: ["先看入口区", "再看柜内死角", "最后看预算"],
+        interactionCues: ["评论区补充你家最乱的位置"],
+      },
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://api.openai.test/v1/responses",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("xhs_benchmark_analysis"),
+      })
+    );
   });
 
   it("generates a GPT Image poster asset for the selected draft card", async () => {

@@ -4,6 +4,7 @@ import {
   analyzeAccountHomepage,
   buildPositioningInputFromHomepage,
 } from "@/lib/core/account-homepage";
+import { analyzeBenchmarkNote } from "@/lib/core/benchmark";
 import { scanCompliance } from "@/lib/core/compliance";
 import { generateDraftFromTopic } from "@/lib/core/content";
 import { rankTopicCandidates } from "@/lib/core/topic";
@@ -18,6 +19,7 @@ import type {
   ContentDraft,
   GeneratedPosterAsset,
   Project,
+  RawBenchmarkNote,
   TopicCandidate,
 } from "@/lib/core/types";
 
@@ -71,6 +73,15 @@ interface AiDraftResult {
     subtitle: string;
     bullets: string[];
   }>;
+}
+
+interface AiBenchmarkAnalysisResult {
+  title: string;
+  openingHook: string;
+  structure: string[];
+  tags: string[];
+  sellingPoints: string[];
+  interactionCues: string[];
 }
 
 interface AiComplianceRewriteResult {
@@ -222,6 +233,40 @@ const draftSchema = {
           },
         },
       },
+    },
+  },
+};
+
+const benchmarkAnalysisSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "openingHook", "structure", "tags", "sellingPoints", "interactionCues"],
+  properties: {
+    title: { type: "string" },
+    openingHook: { type: "string" },
+    structure: {
+      type: "array",
+      minItems: 2,
+      maxItems: 8,
+      items: { type: "string" },
+    },
+    tags: {
+      type: "array",
+      minItems: 1,
+      maxItems: 10,
+      items: { type: "string" },
+    },
+    sellingPoints: {
+      type: "array",
+      minItems: 2,
+      maxItems: 8,
+      items: { type: "string" },
+    },
+    interactionCues: {
+      type: "array",
+      minItems: 1,
+      maxItems: 6,
+      items: { type: "string" },
     },
   },
 };
@@ -528,6 +573,57 @@ export async function generateXhsDraftWithOpenAI(input: {
     hashtags: compactList(ai.hashtags).map((tag) => tag.replace(/^#/, "")),
     assetCards: mergeAssetCards(localDraft.assetCards, ai.cardScripts),
     compliance: scanCompliance(`${selectedTitle}\n${body}`, input.project.forbiddenWords),
+  };
+}
+
+function benchmarkSystemPrompt() {
+  return [
+    "你是一位有十多年经验的小红书运营师，擅长拆解对标笔记结构。",
+    "请只基于用户提供的对标笔记文本分析，不新增不存在的事实。",
+    "输出要服务后续图文生产：标题模式、开头钩子、正文结构、卖点、互动钩子和标签。",
+    "避免医疗、金融、绝对化承诺，不鼓励站外导流。",
+  ].join("\n");
+}
+
+function benchmarkUserPrompt(input: { project: Project; note: RawBenchmarkNote }) {
+  return [
+    `账号行业：${input.project.industry}`,
+    `目标人群：${input.project.audience}`,
+    `账号语气：${input.project.tone}`,
+    `对标标题：${input.note.title}`,
+    `作者：${input.note.author ?? "未知"}`,
+    `互动数据：点赞 ${input.note.metrics?.likes ?? 0} / 收藏 ${input.note.metrics?.saves ?? 0} / 评论 ${
+      input.note.metrics?.comments ?? 0
+    }`,
+    "对标正文：",
+    input.note.body,
+    "请拆解标题、开头钩子、结构、标签、卖点和互动钩子。",
+  ].join("\n");
+}
+
+export async function analyzeXhsBenchmarkWithOpenAI(input: {
+  project: Project;
+  note: RawBenchmarkNote;
+} & OpenAiCallInput): Promise<BenchmarkNote> {
+  const localBenchmark = analyzeBenchmarkNote(input.note);
+  const ai = await generateStructuredText<AiBenchmarkAnalysisResult>({
+    ...textGenerationInput(input),
+    systemPrompt: benchmarkSystemPrompt(),
+    userPrompt: benchmarkUserPrompt(input),
+    schemaName: "xhs_benchmark_analysis",
+    schema: benchmarkAnalysisSchema,
+  });
+
+  return {
+    ...localBenchmark,
+    title: ai.title.trim() || localBenchmark.title,
+    analysis: {
+      openingHook: ai.openingHook.trim() || localBenchmark.analysis.openingHook,
+      structure: compactList(ai.structure),
+      tags: compactList(ai.tags).map((tag) => tag.replace(/^#/, "")),
+      sellingPoints: compactList(ai.sellingPoints),
+      interactionCues: compactList(ai.interactionCues),
+    },
   };
 }
 

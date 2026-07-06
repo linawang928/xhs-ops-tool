@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import type { AiProviderStatusPayload } from "@/lib/ai/status";
 import {
   analyzeXhsAccountHomepageWithOpenAI,
+  analyzeXhsBenchmarkWithOpenAI,
   generateXhsDraftWithOpenAI,
   generateXhsPositioningWithOpenAI,
   generateXhsPosterWithOpenAI,
@@ -59,6 +60,7 @@ import type {
   GeneratedPosterAsset,
   PublishTask,
   Project,
+  RawBenchmarkNote,
   ScoredBenchmarkCandidate,
   TopicCandidate,
 } from "@/lib/core/types";
@@ -942,6 +944,7 @@ export function XhsOpsApp({
   const [isGeneratingPositioning, setIsGeneratingPositioning] = useState(false);
   const [isAnalyzingHomepage, setIsAnalyzingHomepage] = useState(false);
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
+  const [isAnalyzingBenchmark, setIsAnalyzingBenchmark] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
   const [isRewritingCompliance, setIsRewritingCompliance] = useState(false);
@@ -1507,15 +1510,50 @@ export function XhsOpsApp({
     }
   }
 
-  function handleAnalyzeBenchmark() {
-    setBenchmark(
-      analyzeBenchmarkNote({
-        ...demoRawBenchmark,
-        id: `bench-${Date.now()}`,
-        body: rawBenchmarkText,
-        importedAt: new Date().toISOString(),
-      })
-    );
+  function currentRawBenchmarkNote(): RawBenchmarkNote {
+    return {
+      ...demoRawBenchmark,
+      id: `bench-${Date.now()}`,
+      projectId: project.id,
+      title: benchmark.title || demoRawBenchmark.title,
+      body: rawBenchmarkText,
+      importedAt: new Date().toISOString(),
+    };
+  }
+
+  async function handleAnalyzeBenchmark() {
+    const note = currentRawBenchmarkNote();
+
+    if (generationMode === "local") {
+      setBenchmark(analyzeBenchmarkNote(note));
+      setAiStatus("本地模板已拆解对标内容");
+      return;
+    }
+
+    setIsAnalyzingBenchmark(true);
+    setAiStatus("OpenAI 正在拆解对标内容");
+    try {
+      const nextBenchmark = shouldUseBrowserOpenAi()
+        ? await analyzeXhsBenchmarkWithOpenAI({
+            project,
+            note,
+            settings: currentOpenAiSettings(),
+          })
+        : (
+            await postJson<{ benchmark: BenchmarkNote }>("/api/ai/benchmark/", {
+              project,
+              note,
+            })
+          ).benchmark;
+      setBenchmark(nextBenchmark);
+      setRawBenchmarkText(nextBenchmark.body);
+      setAiStatus(shouldUseBrowserOpenAi() ? "浏览器 OpenAI 已拆解对标内容" : "OpenAI 已拆解对标内容");
+    } catch (error) {
+      setBenchmark(analyzeBenchmarkNote(note));
+      setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
+    } finally {
+      setIsAnalyzingBenchmark(false);
+    }
   }
 
   function handleUseBenchmarkCandidate(candidateId: string) {
@@ -2246,9 +2284,10 @@ export function XhsOpsApp({
               icon={Layers3}
               aside={
                 <button
-                  className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white"
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white disabled:opacity-60"
                   onClick={handleAnalyzeBenchmark}
                   type="button"
+                  disabled={isAnalyzingBenchmark}
                 >
                   <Upload size={16} />
                   拆解

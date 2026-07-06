@@ -401,6 +401,62 @@ describe("home dashboard", () => {
     expect(await screen.findByText("租房收纳别乱买，先做这 4 步")).toBeInTheDocument();
   });
 
+  it("uses OpenAI to analyze benchmark notes in OpenAI mode", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === "/api/ai/benchmark/") {
+        return {
+          ok: true,
+          json: async () => ({
+            benchmark: {
+              id: "bench-ai-1",
+              projectId: "project-1",
+              title: "租房收纳别急着买柜子，先看这 5 个死角",
+              body: "租房入口区总是乱，先别买柜子。",
+              author: "小户型整理局",
+              importedAt: "2026-07-07T00:00:00.000Z",
+              analysis: {
+                openingHook: "先用冲动购买痛点抓住租房党。",
+                structure: ["痛点开场", "步骤清单", "互动收尾"],
+                tags: ["租房收纳", "小户型"],
+                sellingPoints: ["入口区", "柜内死角", "低预算"],
+                interactionCues: ["评论区补充你家最乱的位置"],
+              },
+            },
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          serverApiAvailable: true,
+          hasOpenAIKey: true,
+          textModel: "gpt-5.5",
+          imageModel: "gpt-image-2",
+          features: { structuredText: true, posterImage: true },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderHome();
+
+    await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
+    await user.clear(screen.getByLabelText("对标笔记正文"));
+    await user.type(screen.getByLabelText("对标笔记正文"), "租房入口区总是乱，先别买柜子。");
+    await user.click(screen.getByRole("button", { name: "拆解" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai/benchmark/",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("租房入口区总是乱"),
+      })
+    );
+    expect(await screen.findByText("先用冲动购买痛点抓住租房党。")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI 已拆解对标内容")).toBeInTheDocument();
+  });
+
   it("lets operators edit the draft and syncs compliance plus publish package", async () => {
     const user = userEvent.setup();
     await renderHome();
