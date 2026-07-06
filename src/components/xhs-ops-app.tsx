@@ -14,6 +14,7 @@ import {
   Share2,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Target,
   Upload,
@@ -29,6 +30,12 @@ import { analyzeBenchmarkNote } from "@/lib/core/benchmark";
 import { scanCompliance } from "@/lib/core/compliance";
 import { generateDraftFromTopic } from "@/lib/core/content";
 import { createTemplatePosterAssets } from "@/lib/core/poster-template";
+import {
+  createMobilePublishCardPayload,
+  createMobilePublishCardUrl,
+  decodeMobilePublishCardHash,
+  type MobilePublishCardPayload,
+} from "@/lib/core/publish-card";
 import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/publish";
 import { generateTopicCandidates } from "@/lib/core/topic";
 import type {
@@ -187,6 +194,25 @@ function writeStoredProject(project: Project) {
   window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(project));
 }
 
+function readMobilePublishCardFromLocation() {
+  if (typeof window === "undefined") return null;
+  return decodeMobilePublishCardHash(window.location.hash);
+}
+
+function currentMobileCardUrlParts() {
+  if (typeof window === "undefined") {
+    return {
+      origin: "",
+      pathname: "/",
+    };
+  }
+
+  return {
+    origin: window.location.origin,
+    pathname: window.location.pathname || "/",
+  };
+}
+
 function posterAssetsToManifest(assets: GeneratedPosterAsset[]): PublishTask["assetManifest"] {
   return assets.map((asset) => ({
     cardId: asset.cardId,
@@ -264,6 +290,107 @@ function RiskBadge({ level }: { level: "low" | "medium" | "high" }) {
   return <span className={`rounded-md px-2.5 py-1 text-sm font-semibold ${color}`}>{labels[level]}</span>;
 }
 
+function MobilePublishCardView({ payload }: { payload: MobilePublishCardPayload }) {
+  const [copiedCard, setCopiedCard] = useState(false);
+  const [sharedCard, setSharedCard] = useState(false);
+
+  async function handleCopyCardText() {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      await navigator.clipboard.writeText(payload.exportText);
+    }
+    setCopiedCard(true);
+  }
+
+  async function handleShareCardText() {
+    if (typeof navigator !== "undefined" && "share" in navigator) {
+      await navigator.share({
+        title: payload.title,
+        text: payload.exportText,
+      });
+      setSharedCard(true);
+      return;
+    }
+    await handleCopyCardText();
+  }
+
+  return (
+    <main className="min-h-screen bg-[#F8F3E7] px-4 py-6 text-[#1F2723]">
+      <div className="mx-auto grid max-w-xl gap-4">
+        <section className="rounded-lg border border-[#D8D2C1] bg-white p-5">
+          <p className="text-sm font-semibold uppercase text-[#E85D75]">XHS Mobile Publish</p>
+          <h1 className="mt-2 text-2xl font-semibold">手机发布卡</h1>
+          <h2 className="mt-5 text-xl font-semibold leading-8">{payload.title}</h2>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {payload.hashtags.map((tag) => (
+              <span key={tag} className="rounded-md bg-[#FFF3C9] px-2 py-1 text-xs text-[#74530C]">
+                #{tag}
+              </span>
+            ))}
+          </div>
+          <pre className="mt-5 max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-[#1F2723] p-4 text-sm leading-6 text-[#FCFAF3]">
+            {payload.exportText}
+          </pre>
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#2E6B5F] bg-white px-3 text-sm font-semibold text-[#214F45]"
+              type="button"
+              onClick={handleCopyCardText}
+            >
+              <ClipboardCheck size={16} />
+              {copiedCard ? "已复制" : "复制文案"}
+            </button>
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#E85D75] bg-white px-3 text-sm font-semibold text-[#9D2633]"
+              type="button"
+              onClick={handleShareCardText}
+            >
+              <Share2 size={16} />
+              {sharedCard ? "已分享" : "系统分享"}
+            </button>
+            <a
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#E85D75] px-3 text-sm font-semibold text-white"
+              href={payload.xhsAppPublishUrl}
+            >
+              <Smartphone size={16} />
+              打开小红书
+            </a>
+            <a
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white"
+              href={payload.officialPublishUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={16} />
+              网页发布
+            </a>
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-[#D8D2C1] bg-white p-5">
+          <p className="text-xs font-semibold uppercase text-[#6D6A61]">素材清单</p>
+          <div className="mt-3 grid gap-2">
+            {payload.assetManifest.length > 0 ? (
+              payload.assetManifest.map((asset) => (
+                <div
+                  key={`${asset.cardId}-${asset.fileName}`}
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-[#F8F3E7] p-3 text-sm"
+                >
+                  <span className="min-w-0 truncate">{asset.fileName}</span>
+                  <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs text-[#6D6A61]">
+                    {asset.source === "openai" ? "GPT" : "模板"}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-md bg-[#F8F3E7] p-3 text-sm text-[#6D6A61]">暂无素材</div>
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsOpsAppProps = {}) {
   const storedProjectAtRender = readStoredProject();
   const initialProject = storedProjectAtRender ?? demoProject;
@@ -321,6 +448,11 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
   const [publishTask, setPublishTask] = useState<PublishTask>(demoPublishTask);
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
+  const [mobilePublishCardPayload] = useState<MobilePublishCardPayload | null>(() =>
+    readMobilePublishCardFromLocation()
+  );
+  const [mobilePublishCardUrl, setMobilePublishCardUrl] = useState("");
+  const [mobileCardStatus, setMobileCardStatus] = useState("");
 
   const selectedTopic = useMemo(
     () => topics.find((topic) => topic.id === selectedTopicId) ?? topics[0],
@@ -571,6 +703,8 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     setPublishTask(nextTask);
     setCopied(false);
     setShared(false);
+    setMobilePublishCardUrl("");
+    setMobileCardStatus("");
   }
 
   async function handleGeneratePoster() {
@@ -653,6 +787,21 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     }
 
     await handleCopyPackage();
+  }
+
+  async function handleCreateMobilePublishCard() {
+    const payload = createMobilePublishCardPayload(publishTask, draft);
+    const url = createMobilePublishCardUrl(payload, currentMobileCardUrlParts());
+    setMobilePublishCardUrl(url);
+    setMobileCardStatus("手机卡已生成");
+
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+    }
+  }
+
+  if (mobilePublishCardPayload) {
+    return <MobilePublishCardView payload={mobilePublishCardPayload} />;
   }
 
   return (
@@ -1360,6 +1509,14 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
                     {shared ? "已唤起" : "手机分享"}
                   </button>
                   <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1F2723] bg-white px-3 text-sm font-semibold text-[#1F2723]"
+                    onClick={handleCreateMobilePublishCard}
+                    type="button"
+                  >
+                    <Smartphone size={16} />
+                    生成手机卡
+                  </button>
+                  <button
                     className="inline-flex h-10 items-center gap-2 rounded-md border border-[#2E6B5F] bg-white px-3 text-sm font-semibold text-[#214F45]"
                     onClick={handleCopyPackage}
                     type="button"
@@ -1393,6 +1550,20 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
                   <Check size={16} />
                   {publishTask.status === "ready" ? "加入队列" : "标记发布"}
                 </button>
+                {mobilePublishCardUrl && (
+                  <div className="mt-5 grid gap-2 rounded-lg border border-[#D8D2C1] bg-[#FCFAF3] p-3">
+                    <p className="text-sm font-semibold text-[#214F45]">{mobileCardStatus}</p>
+                    <a
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white"
+                      href={mobilePublishCardUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={16} />
+                      打开手机卡
+                    </a>
+                  </div>
+                )}
               </div>
               <div className="rounded-lg border border-[#D8D2C1] bg-white p-5">
                 <div className="grid gap-3 md:grid-cols-2">

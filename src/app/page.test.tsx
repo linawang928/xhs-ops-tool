@@ -30,6 +30,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window.navigator, "share");
   window.localStorage?.clear();
+  window.history.replaceState(null, "", "/");
 });
 
 describe("home dashboard", () => {
@@ -370,5 +371,50 @@ describe("home dashboard", () => {
       })
     );
     expect(screen.getByRole("button", { name: "已唤起" })).toBeInTheDocument();
+  });
+
+  it("creates a mobile publish card link from the publish queue", async () => {
+    const user = userEvent.setup();
+    const clipboardMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText: clipboardMock },
+      configurable: true,
+    });
+    window.history.replaceState(null, "", `${window.location.origin}/xhs-ops-tool/`);
+    await renderHome();
+
+    await user.click(screen.getByRole("button", { name: "生成手机卡" }));
+
+    const link = screen.getByRole("link", { name: "打开手机卡" });
+    expect(link).toHaveAttribute("href", expect.stringContaining("#publish-card="));
+    expect(clipboardMock).toHaveBeenCalledWith(expect.stringContaining("#publish-card="));
+    expect(screen.getByText("手机卡已生成")).toBeInTheDocument();
+  });
+
+  it("opens a mobile publish card from the URL hash", async () => {
+    const payload = {
+      version: 1,
+      title: "租房收纳别乱买，先做这 4 步",
+      body: "先看入口区，再看柜内空间。",
+      hashtags: ["租房收纳", "小户型"],
+      exportText: "租房收纳别乱买，先做这 4 步\n\n先看入口区，再看柜内空间。\n\n#租房收纳 #小户型",
+      officialPublishUrl: "https://creator.xiaohongshu.com/publish/publish",
+      xhsAppPublishUrl: "xhsdiscover://post",
+      scheduledAt: "2026-07-07T12:30:00.000Z",
+      checklist: ["确认素材已保存"],
+      assetManifest: [{ fileName: "xhs-poster-1.svg", source: "template" }],
+    };
+    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    window.history.replaceState(null, "", `/#publish-card=${encoded}`);
+
+    await renderHome();
+
+    expect(screen.getByRole("heading", { name: "手机发布卡" })).toBeInTheDocument();
+    expect(screen.getByText("租房收纳别乱买，先做这 4 步")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开小红书" })).toHaveAttribute("href", "xhsdiscover://post");
+    expect(screen.getByRole("link", { name: "网页发布" })).toHaveAttribute(
+      "href",
+      "https://creator.xiaohongshu.com/publish/publish"
+    );
   });
 });
