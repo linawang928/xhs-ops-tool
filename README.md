@@ -14,10 +14,29 @@
 
 ```bash
 pnpm install
+cp .env.example .env.local
 pnpm dev
 ```
 
 打开 [http://localhost:3000](http://localhost:3000)。
+
+## OpenAI 生成配置
+
+本地 OpenAI 模式通过 Next.js API Route 调用服务端环境变量，不会把 API Key 发送到浏览器或落库。
+
+1. 在 `.env.local` 填入 `OPENAI_API_KEY`。
+2. 默认文本模型为 `OPENAI_TEXT_MODEL=gpt-5.5`。
+3. 默认图片模型为 `OPENAI_IMAGE_MODEL=gpt-image-2`。
+4. 启动 `pnpm dev` 后，在页面顶部把“生成模式”切到 `OpenAI GPT`。
+
+可用的 OpenAI 功能：
+
+- 账号定位：调用 `/api/ai/positioning`
+- 爆款选题：调用 `/api/ai/topics`
+- 图文文案：调用 `/api/ai/draft`
+- 海报图：调用 `/api/ai/poster`，返回浏览器可预览的 data URL
+
+GitHub Pages 只能托管静态页面，不能保存 API Key 或执行服务端 GPT 调用。真实 GPT 生成请用本地 `pnpm dev`，线上 Pages 版本保留工作台界面和本地模板 fallback。
 
 ## 常用脚本
 
@@ -25,6 +44,7 @@ pnpm dev
 pnpm test
 pnpm lint
 pnpm build
+GITHUB_PAGES=true pnpm build
 pnpm db:generate
 ```
 

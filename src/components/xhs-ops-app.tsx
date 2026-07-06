@@ -11,11 +11,13 @@ import {
   Image as ImageIcon,
   Layers3,
   Search,
+  Share2,
   ShieldCheck,
   Sparkles,
   Target,
   Upload,
 } from "lucide-react";
+import NextImage from "next/image";
 import { useMemo, useState } from "react";
 import { filterBenchmarkCandidates, generateAccountPositioning } from "@/lib/core/account";
 import { analyzeBenchmarkNote } from "@/lib/core/benchmark";
@@ -42,6 +44,14 @@ import {
   demoTopics,
 } from "@/lib/sample-data";
 
+type GenerationMode = "local" | "openai";
+
+interface GeneratedPoster {
+  url: string;
+  alt: string;
+  cardId: string;
+}
+
 const workspaceNav = [
   { label: "Positioning", icon: Compass },
   { label: "Topic", icon: Search },
@@ -50,6 +60,19 @@ const workspaceNav = [
   { label: "Guard", icon: ShieldCheck },
   { label: "Queue", icon: CalendarDays },
 ];
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error ?? `Request failed with HTTP ${response.status}`);
+  }
+  return payload as T;
+}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -113,6 +136,13 @@ function RiskBadge({ level }: { level: "low" | "medium" | "high" }) {
 }
 
 export function XhsOpsApp() {
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("local");
+  const [aiStatus, setAiStatus] = useState("本地模板模式");
+  const [isGeneratingPositioning, setIsGeneratingPositioning] = useState(false);
+  const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
+  const [posterImages, setPosterImages] = useState<GeneratedPoster[]>([]);
   const [subjectArea, setSubjectArea] = useState(demoAccountPositioning.subjectArea);
   const [accountAudience, setAccountAudience] = useState(demoAccountPositioning.audience);
   const [differentiator, setDifferentiator] = useState(demoAccountPositioning.differentiator);
@@ -132,6 +162,7 @@ export function XhsOpsApp() {
   const [scanText, setScanText] = useState(`${demoDraft.selectedTitle}\n${demoDraft.body}`);
   const [publishTask, setPublishTask] = useState<PublishTask>(demoPublishTask);
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
 
   const selectedTopic = useMemo(
     () => topics.find((topic) => topic.id === selectedTopicId) ?? topics[0],
@@ -167,23 +198,69 @@ export function XhsOpsApp() {
     [accountPositioning, benchmarkFormat, benchmarkSubjectArea]
   );
 
-  function handleGeneratePositioning() {
-    const nextPositioning = generateAccountPositioning({
-      projectId: demoProject.id,
-      subjectArea,
-      audience: accountAudience,
-      differentiator,
-      tone: accountTone,
-    });
+  function applyPositioning(nextPositioning: AccountPositioning) {
     setAccountPositioning(nextPositioning);
     setBenchmarkSubjectArea(nextPositioning.benchmarkFilters.subjectArea);
     setBenchmarkFormat("全部");
   }
 
-  function handleGenerateTopics() {
-    const nextTopics = generateTopicCandidates(keyword, demoProject);
-    setTopics(nextTopics);
-    setSelectedTopicId(nextTopics[0].id);
+  async function handleGeneratePositioning() {
+    const input = {
+      projectId: demoProject.id,
+      subjectArea,
+      audience: accountAudience,
+      differentiator,
+      tone: accountTone,
+    };
+
+    if (generationMode === "local") {
+      applyPositioning(generateAccountPositioning(input));
+      setAiStatus("本地模板已生成");
+      return;
+    }
+
+    setIsGeneratingPositioning(true);
+    setAiStatus("OpenAI 正在生成定位");
+    try {
+      const payload = await postJson<{ positioning: AccountPositioning }>("/api/ai/positioning/", input);
+      applyPositioning(payload.positioning);
+      setAiStatus("OpenAI 已生成定位");
+    } catch (error) {
+      applyPositioning(generateAccountPositioning(input));
+      setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
+    } finally {
+      setIsGeneratingPositioning(false);
+    }
+  }
+
+  async function handleGenerateTopics() {
+    if (generationMode === "local") {
+      const nextTopics = generateTopicCandidates(keyword, demoProject);
+      setTopics(nextTopics);
+      setSelectedTopicId(nextTopics[0].id);
+      setAiStatus("本地模板已生成选题");
+      return;
+    }
+
+    setIsGeneratingTopics(true);
+    setAiStatus("OpenAI 正在检索选题");
+    try {
+      const payload = await postJson<{ topics: TopicCandidate[] }>("/api/ai/topics/", {
+        keyword,
+        project: demoProject,
+      });
+      const nextTopics = payload.topics.length > 0 ? payload.topics : generateTopicCandidates(keyword, demoProject);
+      setTopics(nextTopics);
+      setSelectedTopicId(nextTopics[0].id);
+      setAiStatus("OpenAI 已生成选题");
+    } catch (error) {
+      const nextTopics = generateTopicCandidates(keyword, demoProject);
+      setTopics(nextTopics);
+      setSelectedTopicId(nextTopics[0].id);
+      setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
+    } finally {
+      setIsGeneratingTopics(false);
+    }
   }
 
   function handleAnalyzeBenchmark() {
@@ -222,17 +299,63 @@ export function XhsOpsApp() {
     );
   }
 
-  function handleGenerateDraft() {
-    const nextDraft = generateDraftFromTopic(selectedTopic, demoProject, [benchmark]);
+  async function handleGenerateDraft() {
+    let nextDraft = generateDraftFromTopic(selectedTopic, demoProject, [benchmark]);
+
+    if (generationMode === "openai") {
+      setIsGeneratingDraft(true);
+      setAiStatus("OpenAI 正在生成文案");
+      try {
+        const payload = await postJson<{ draft: ContentDraft }>("/api/ai/draft/", {
+          project: demoProject,
+          topic: selectedTopic,
+          benchmarks: [benchmark],
+        });
+        nextDraft = payload.draft;
+        setAiStatus("OpenAI 已生成文案");
+      } catch (error) {
+        setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
+      } finally {
+        setIsGeneratingDraft(false);
+      }
+    } else {
+      setAiStatus("本地模板已生成文案");
+    }
+
     const nextTask = prepareManualPublishPackage(
       nextDraft,
       demoProject,
       "2026-07-07T12:30:00.000Z"
     );
     setDraft(nextDraft);
+    setPosterImages([]);
     setScanText(`${nextDraft.selectedTitle}\n${nextDraft.body}`);
     setPublishTask(nextTask);
     setCopied(false);
+    setShared(false);
+  }
+
+  async function handleGeneratePoster() {
+    if (generationMode !== "openai") {
+      setAiStatus("生成海报需要 OpenAI 模式");
+      return;
+    }
+
+    setIsGeneratingPoster(true);
+    setAiStatus("OpenAI 正在生成海报");
+    try {
+      const payload = await postJson<{ image: GeneratedPoster }>("/api/ai/poster/", {
+        project: demoProject,
+        draft,
+        cardId: draft.assetCards[0]?.id,
+      });
+      setPosterImages((images) => [payload.image, ...images].slice(0, 4));
+      setAiStatus("OpenAI 已生成海报");
+    } catch (error) {
+      setAiStatus(error instanceof Error ? `OpenAI 图片不可用：${error.message}` : "OpenAI 图片不可用");
+    } finally {
+      setIsGeneratingPoster(false);
+    }
   }
 
   function handleQueueTask() {
@@ -244,6 +367,20 @@ export function XhsOpsApp() {
       await navigator.clipboard.writeText(publishTask.exportText);
     }
     setCopied(true);
+  }
+
+  async function handleSharePackage() {
+    const title = publishTask.exportText.split("\n")[0] ?? draft.selectedTitle;
+    if (typeof navigator !== "undefined" && "share" in navigator) {
+      await navigator.share({
+        title,
+        text: publishTask.exportText,
+      });
+      setShared(true);
+      return;
+    }
+
+    await handleCopyPackage();
   }
 
   return (
@@ -276,6 +413,26 @@ export function XhsOpsApp() {
               </a>
             ))}
           </nav>
+          <div className="flex flex-col gap-3 rounded-md border border-[#D8D2C1] bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold uppercase text-[#6D6A61] sm:w-64">
+              生成模式
+              <select
+                className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                value={generationMode}
+                onChange={(event) => {
+                  const nextMode = event.target.value as GenerationMode;
+                  setGenerationMode(nextMode);
+                  setAiStatus(nextMode === "openai" ? "OpenAI 模式" : "本地模板模式");
+                }}
+              >
+                <option value="local">本地模板</option>
+                <option value="openai">OpenAI GPT</option>
+              </select>
+            </label>
+            <div className="min-w-0 rounded-md bg-[#F8F3E7] px-3 py-2 text-sm font-medium text-[#3B403C]">
+              {aiStatus}
+            </div>
+          </div>
         </div>
       </header>
 
@@ -290,6 +447,7 @@ export function XhsOpsApp() {
                   className="inline-flex h-10 items-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white"
                   onClick={handleGeneratePositioning}
                   type="button"
+                  disabled={isGeneratingPositioning}
                 >
                   <Sparkles size={16} />
                   生成定位
@@ -393,6 +551,7 @@ export function XhsOpsApp() {
                     className="inline-flex h-10 items-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white"
                     onClick={handleGenerateTopics}
                     type="button"
+                    disabled={isGeneratingTopics}
                   >
                     <Search size={16} />
                     检索
@@ -560,14 +719,26 @@ export function XhsOpsApp() {
               title="Content Studio"
               icon={FileText}
               aside={
-                <button
-                  className="inline-flex h-10 items-center gap-2 rounded-md bg-[#E85D75] px-3 text-sm font-semibold text-white"
-                  onClick={handleGenerateDraft}
-                  type="button"
-                >
-                  <Sparkles size={16} />
-                  生成
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md bg-[#E85D75] px-3 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={handleGenerateDraft}
+                    type="button"
+                    disabled={isGeneratingDraft}
+                  >
+                    <Sparkles size={16} />
+                    生成
+                  </button>
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={handleGeneratePoster}
+                    type="button"
+                    disabled={isGeneratingPoster}
+                  >
+                    <ImageIcon size={16} />
+                    生成海报
+                  </button>
+                </div>
               }
             />
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -596,6 +767,24 @@ export function XhsOpsApp() {
                 </div>
               </article>
               <div className="grid gap-3">
+                {posterImages.length > 0 && (
+                  <div className="rounded-lg border border-[#D8D2C1] bg-white p-3">
+                    <p className="mb-3 text-xs font-semibold uppercase text-[#6D6A61]">Poster Preview</p>
+                    <div className="grid gap-3">
+                      {posterImages.map((poster) => (
+                        <NextImage
+                          key={`${poster.cardId}-${poster.url.slice(-12)}`}
+                          src={poster.url}
+                          alt={poster.alt}
+                          width={512}
+                          height={768}
+                          unoptimized
+                          className="aspect-[3/4] w-full rounded-md border border-[#D8D2C1] object-cover"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {draft.assetCards.map((card) => (
                   <div
                     key={card.id}
@@ -671,6 +860,14 @@ export function XhsOpsApp() {
               icon={CalendarDays}
               aside={
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-[#E85D75] bg-white px-3 text-sm font-semibold text-[#9D2633]"
+                    onClick={handleSharePackage}
+                    type="button"
+                  >
+                    <Share2 size={16} />
+                    {shared ? "已唤起" : "手机分享"}
+                  </button>
                   <button
                     className="inline-flex h-10 items-center gap-2 rounded-md border border-[#2E6B5F] bg-white px-3 text-sm font-semibold text-[#214F45]"
                     onClick={handleCopyPackage}

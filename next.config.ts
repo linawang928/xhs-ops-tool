@@ -1,11 +1,11 @@
 import type { NextConfig } from "next";
 
-const isGitHubActions = process.env.GITHUB_ACTIONS === "true";
+const isGitHubPages = process.env.GITHUB_PAGES === "true" || process.env.GITHUB_ACTIONS === "true";
 
 const nextConfig: NextConfig = {
-  output: "export",
+  output: isGitHubPages ? "export" : undefined,
   trailingSlash: true,
-  basePath: isGitHubActions ? "/xhs-ops-tool" : "",
+  basePath: isGitHubPages ? "/xhs-ops-tool" : "",
   images: {
     unoptimized: true,
   },
