@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783339757022,
+      "tag": "0000_chemical_mentor",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783341337234,
+      "tag": "0001_premium_husk",
+      "breakpoints": true
+    }
+  ]
+}
