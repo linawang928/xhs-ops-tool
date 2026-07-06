@@ -13,6 +13,7 @@ import {
   Search,
   Share2,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Target,
   Upload,
@@ -40,10 +41,10 @@ import type {
   ContentDraft,
   GeneratedPosterAsset,
   PublishTask,
+  Project,
   TopicCandidate,
 } from "@/lib/core/types";
 import {
-  demoAccountPositioning,
   demoBenchmark,
   demoBenchmarkCandidates,
   demoDraft,
@@ -69,6 +70,7 @@ const demoHomepageText = [
 ].join("\n");
 
 const workspaceNav = [
+  { label: "Settings", icon: SlidersHorizontal },
   { label: "Positioning", icon: Compass },
   { label: "Topic", icon: Search },
   { label: "Benchmark", icon: Layers3 },
@@ -76,6 +78,18 @@ const workspaceNav = [
   { label: "Guard", icon: ShieldCheck },
   { label: "Queue", icon: CalendarDays },
 ];
+
+const PROJECT_STORAGE_KEY = "xhs-ops-project";
+
+type ProjectFormState = {
+  name: string;
+  persona: string;
+  industry: string;
+  tone: string;
+  audience: string;
+  forbiddenWords: string;
+  brandColors: string;
+};
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -102,6 +116,75 @@ function parseHomepageText(rawText: string, projectId: string): AccountHomepageI
     bio: lines[1] ?? lines[0] ?? "未填写简介",
     recentNotesText: lines.slice(2).join("\n") || lines.join("\n") || "未提供近期笔记",
   };
+}
+
+function projectToForm(project: Project): ProjectFormState {
+  return {
+    name: project.name,
+    persona: project.persona,
+    industry: project.industry,
+    tone: project.tone,
+    audience: project.audience,
+    forbiddenWords: project.forbiddenWords.join(", "),
+    brandColors: project.brandColors.join(", "),
+  };
+}
+
+function splitList(value: string) {
+  return value
+    .split(/[,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseBrandColors(value: string) {
+  const colors = splitList(value).filter((color) => /^#[0-9a-f]{6}$/i.test(color));
+  return colors.length > 0 ? colors.slice(0, 5) : demoProject.brandColors;
+}
+
+function projectFromForm(form: ProjectFormState, previous: Project): Project {
+  return {
+    id: previous.id,
+    name: form.name.trim() || previous.name,
+    persona: form.persona.trim() || previous.persona,
+    industry: form.industry.trim() || previous.industry,
+    tone: form.tone.trim() || previous.tone,
+    audience: form.audience.trim() || previous.audience,
+    forbiddenWords: splitList(form.forbiddenWords),
+    brandColors: parseBrandColors(form.brandColors),
+  };
+}
+
+function isProject(value: unknown): value is Project {
+  const project = value as Partial<Project>;
+  return Boolean(
+    project &&
+      typeof project.id === "string" &&
+      typeof project.name === "string" &&
+      typeof project.persona === "string" &&
+      typeof project.industry === "string" &&
+      typeof project.tone === "string" &&
+      typeof project.audience === "string" &&
+      Array.isArray(project.forbiddenWords) &&
+      Array.isArray(project.brandColors)
+  );
+}
+
+function readStoredProject() {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isProject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProject(project: Project) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(project));
 }
 
 function posterAssetsToManifest(assets: GeneratedPosterAsset[]): PublishTask["assetManifest"] {
@@ -182,15 +265,23 @@ function RiskBadge({ level }: { level: "low" | "medium" | "high" }) {
 }
 
 export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsOpsAppProps = {}) {
+  const storedProjectAtRender = readStoredProject();
+  const initialProject = storedProjectAtRender ?? demoProject;
   const initialHomepageAnalysis = initialHomepageText
-    ? analyzeAccountHomepage(parseHomepageText(initialHomepageText, demoProject.id))
+    ? analyzeAccountHomepage(parseHomepageText(initialHomepageText, initialProject.id))
     : null;
   const derivedPositioningInput =
     initialPositioningInput ??
     (initialHomepageAnalysis ? buildPositioningInputFromHomepage(initialHomepageAnalysis) : undefined);
   const initialPositioning = derivedPositioningInput
     ? generateAccountPositioning(derivedPositioningInput)
-    : demoAccountPositioning;
+    : generateAccountPositioning({
+        projectId: initialProject.id,
+        subjectArea: initialProject.industry,
+        audience: initialProject.audience,
+        differentiator: "把复杂信息翻译成能执行的日常判断",
+        tone: initialProject.tone,
+      });
   const initialAiStatus = initialHomepageAnalysis
     ? "本地模板已分析主页"
     : initialPositioningInput
@@ -198,6 +289,9 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
       : "本地模板模式";
   const [generationMode, setGenerationMode] = useState<GenerationMode>("local");
   const [aiStatus, setAiStatus] = useState(initialAiStatus);
+  const [project, setProject] = useState<Project>(initialProject);
+  const [projectForm, setProjectForm] = useState<ProjectFormState>(() => projectToForm(initialProject));
+  const [settingsStatus, setSettingsStatus] = useState(storedProjectAtRender ? "已加载本地设置" : "使用默认设置");
   const [isGeneratingPositioning, setIsGeneratingPositioning] = useState(false);
   const [isAnalyzingHomepage, setIsAnalyzingHomepage] = useState(false);
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
@@ -233,8 +327,8 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     [selectedTopicId, topics]
   );
   const compliance = useMemo(
-    () => scanCompliance(scanText, demoProject.forbiddenWords),
-    [scanText]
+    () => scanCompliance(scanText, project.forbiddenWords),
+    [project.forbiddenWords, scanText]
   );
   const subjectAreaOptions = useMemo(
     () =>
@@ -277,9 +371,30 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     }));
   }
 
+  function handleProjectFormChange(field: keyof ProjectFormState, value: string) {
+    setProjectForm((form) => ({
+      ...form,
+      [field]: value,
+    }));
+    setSettingsStatus("设置未保存");
+  }
+
+  function handleSaveProjectSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextProject = projectFromForm(projectForm, project);
+    setProject(nextProject);
+    setProjectForm(projectToForm(nextProject));
+    setSubjectArea((current) => (current === project.industry ? nextProject.industry : current));
+    setAccountAudience((current) => (current === project.audience ? nextProject.audience : current));
+    setAccountTone((current) => (current === project.tone ? nextProject.tone : current));
+    writeStoredProject(nextProject);
+    setSettingsStatus("设置已保存");
+    setAiStatus("项目设置已更新");
+  }
+
   async function handleGeneratePositioning() {
     const input = {
-      projectId: demoProject.id,
+      projectId: project.id,
       subjectArea,
       audience: accountAudience,
       differentiator,
@@ -312,7 +427,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
   }
 
   async function handleAnalyzeHomepage() {
-    const profile = parseHomepageText(rawHomepageText, demoProject.id);
+    const profile = parseHomepageText(rawHomepageText, project.id);
 
     if (generationMode === "local") {
       setHomepageAnalysis(analyzeAccountHomepage(profile));
@@ -327,7 +442,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
         analysis: AccountHomepageAnalysis;
         positioningInput: AccountPositioningInput;
       }>("/api/ai/account-analysis/", {
-        project: demoProject,
+        project,
         profile,
       });
       setHomepageAnalysis(payload.analysis);
@@ -347,7 +462,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
 
   function handleApplyHomepageAnalysis() {
     if (!homepageAnalysis) return;
-    const input = buildPositioningInputFromHomepage(homepageAnalysis);
+      const input = buildPositioningInputFromHomepage(homepageAnalysis);
     setSubjectArea(input.subjectArea);
     setAccountAudience(input.audience);
     setDifferentiator(input.differentiator);
@@ -358,7 +473,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
 
   async function handleGenerateTopics() {
     if (generationMode === "local") {
-      const nextTopics = generateTopicCandidates(keyword, demoProject);
+      const nextTopics = generateTopicCandidates(keyword, project);
       setTopics(nextTopics);
       setSelectedTopicId(nextTopics[0].id);
       setAiStatus("本地模板已生成选题");
@@ -370,14 +485,14 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     try {
       const payload = await postJson<{ topics: TopicCandidate[] }>("/api/ai/topics/", {
         keyword,
-        project: demoProject,
+        project,
       });
-      const nextTopics = payload.topics.length > 0 ? payload.topics : generateTopicCandidates(keyword, demoProject);
+      const nextTopics = payload.topics.length > 0 ? payload.topics : generateTopicCandidates(keyword, project);
       setTopics(nextTopics);
       setSelectedTopicId(nextTopics[0].id);
       setAiStatus("OpenAI 已生成选题");
     } catch (error) {
-      const nextTopics = generateTopicCandidates(keyword, demoProject);
+      const nextTopics = generateTopicCandidates(keyword, project);
       setTopics(nextTopics);
       setSelectedTopicId(nextTopics[0].id);
       setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
@@ -423,14 +538,14 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
   }
 
   async function handleGenerateDraft() {
-    let nextDraft = generateDraftFromTopic(selectedTopic, demoProject, [benchmark]);
+    let nextDraft = generateDraftFromTopic(selectedTopic, project, [benchmark]);
 
     if (generationMode === "openai") {
       setIsGeneratingDraft(true);
       setAiStatus("OpenAI 正在生成文案");
       try {
         const payload = await postJson<{ draft: ContentDraft }>("/api/ai/draft/", {
-          project: demoProject,
+          project,
           topic: selectedTopic,
           benchmarks: [benchmark],
         });
@@ -447,7 +562,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
 
     const nextTask = prepareManualPublishPackage(
       nextDraft,
-      demoProject,
+      project,
       "2026-07-07T12:30:00.000Z"
     );
     setDraft(nextDraft);
@@ -460,7 +575,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
 
   async function handleGeneratePoster() {
     if (generationMode !== "openai") {
-      const templatePosters = createTemplatePosterAssets(draft, demoProject);
+      const templatePosters = createTemplatePosterAssets(draft, project);
       syncPosterAssets(templatePosters);
       setAiStatus("本地模板已生成海报");
       return;
@@ -470,7 +585,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     setAiStatus("OpenAI 正在生成海报");
     try {
       const payload = await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
-        project: demoProject,
+        project,
         draft,
         cardId: draft.assetCards[0]?.id,
       });
@@ -488,7 +603,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
       });
       setAiStatus("OpenAI 已生成海报");
     } catch (error) {
-      const templatePosters = createTemplatePosterAssets(draft, demoProject);
+      const templatePosters = createTemplatePosterAssets(draft, project);
       syncPosterAssets(templatePosters);
       setAiStatus(
         error instanceof Error
@@ -595,6 +710,100 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
 
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-8 md:px-8 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-10">
+          <section id="settings" className="scroll-mt-8">
+            <SectionHeader
+              title="Project Settings"
+              icon={SlidersHorizontal}
+              aside={
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white"
+                  form="project-settings-form"
+                  type="submit"
+                >
+                  <Check size={16} />
+                  保存设置
+                </button>
+              }
+            />
+            <form
+              id="project-settings-form"
+              aria-label="项目设置"
+              onSubmit={handleSaveProjectSettings}
+              className="rounded-lg border border-[#D8D2C1] bg-white p-5"
+            >
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
+                  项目名称
+                  <input
+                    className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.name}
+                    onChange={(event) => handleProjectFormChange("name", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
+                  项目行业
+                  <input
+                    className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.industry}
+                    onChange={(event) => handleProjectFormChange("industry", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
+                  目标受众
+                  <input
+                    className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.audience}
+                    onChange={(event) => handleProjectFormChange("audience", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
+                  品牌语气
+                  <input
+                    className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.tone}
+                    onChange={(event) => handleProjectFormChange("tone", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C] md:col-span-2">
+                  账号人设
+                  <textarea
+                    className="min-h-20 rounded-md border border-[#CFC7B5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.persona}
+                    onChange={(event) => handleProjectFormChange("persona", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
+                  禁用词
+                  <textarea
+                    className="min-h-20 rounded-md border border-[#CFC7B5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.forbiddenWords}
+                    onChange={(event) => handleProjectFormChange("forbiddenWords", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-[#3B403C]">
+                  品牌色
+                  <textarea
+                    className="min-h-20 rounded-md border border-[#CFC7B5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
+                    value={projectForm.brandColors}
+                    onChange={(event) => handleProjectFormChange("brandColors", event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="rounded-md bg-[#F8F3E7] px-3 py-1.5 text-sm font-medium text-[#3B403C]">
+                  {settingsStatus}
+                </span>
+                {project.brandColors.map((color) => (
+                  <span
+                    key={color}
+                    className="size-8 rounded-md border border-black/10"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </form>
+          </section>
+
           <section id="positioning" className="scroll-mt-8">
             <SectionHeader
               title="Account Positioning"
@@ -1240,7 +1449,7 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
               </div>
             </dl>
             <div className="mt-4 flex gap-2">
-              {demoProject.brandColors.map((color) => (
+              {project.brandColors.map((color) => (
                 <span
                   key={color}
                   className="size-8 rounded-md border border-black/10"
