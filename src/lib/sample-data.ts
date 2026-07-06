@@ -37,6 +37,28 @@ export const demoAccountPositioning = generateAccountPositioning({
 
 export const demoBenchmarkCandidates: BenchmarkCandidate[] = [
   {
+    id: "bench-storage-1",
+    projectId: demoProject.id,
+    title: "租房收纳别急着买柜子，先看这 5 个死角",
+    author: "小户型整理局",
+    subjectArea: "家居收纳",
+    contentFormat: "避坑清单",
+    audiencePain: "租房党空间小、预算有限，不知道先改哪里",
+    tags: ["租房收纳", "小户型", "收纳避坑"],
+    metrics: { likes: 5200, saves: 3600, comments: 240 },
+  },
+  {
+    id: "bench-storage-2",
+    projectId: demoProject.id,
+    title: "小户型入口区整理流程，每天出门少找 10 分钟",
+    author: "动线改造笔记",
+    subjectArea: "家居收纳",
+    contentFormat: "流程模板",
+    audiencePain: "钥匙、包和快递总堆在门口，早上容易乱",
+    tags: ["入口区收纳", "租房改造", "整理流程"],
+    metrics: { likes: 3900, saves: 2600, comments: 156 },
+  },
+  {
     id: "bench-skincare-1",
     projectId: demoProject.id,
     title: "敏感肌修护别乱买，先看这 4 个成分",

@@ -76,6 +76,52 @@ describe("home dashboard", () => {
     expect(screen.getByRole("option", { name: "家居收纳" })).toBeInTheDocument();
   });
 
+  it("analyzes an account homepage and applies the inferred positioning to benchmark filters", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.clear(screen.getByLabelText("账号主页资料"));
+    await user.type(
+      screen.getByLabelText("账号主页资料"),
+      "租房收纳小记\n给租房党和小户型新手做低预算收纳清单，不乱买柜子。\n租房收纳别急着买柜子，先看这 5 个死角\n入口区避坑清单"
+    );
+    await user.click(screen.getByRole("button", { name: "分析主页" }));
+
+    expect(screen.getByText("主页诊断")).toBeInTheDocument();
+    expect(screen.getAllByText("家居收纳").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/租房党/).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "应用到定位" }));
+
+    expect(screen.getByLabelText("账号主体区")).toHaveValue("家居收纳");
+    expect(screen.getByLabelText("主体区")).toHaveValue("家居收纳");
+    expect(screen.getByRole("option", { name: "家居收纳" })).toBeInTheDocument();
+  });
+
+  it("renders homepage analysis from query params for no-js account analysis submissions", async () => {
+    await renderHome(
+      Promise.resolve({
+        homepageText:
+          "租房收纳小记\n给租房党和小户型新手做低预算收纳清单，不乱买柜子。\n租房收纳别急着买柜子，先看这 5 个死角\n入口区避坑清单",
+      })
+    );
+
+    const homepageForm = screen.getByRole("form", { name: "账号主页分析" });
+    expect(homepageForm).toHaveAttribute("method", "get");
+    expect(homepageForm).not.toHaveAttribute("action");
+    expect(screen.getByRole("button", { name: "分析主页" })).toHaveAttribute(
+      "form",
+      "homepage-analysis-form"
+    );
+    expect(screen.getByLabelText("账号主页资料")).toHaveValue(
+      "租房收纳小记\n给租房党和小户型新手做低预算收纳清单，不乱买柜子。\n租房收纳别急着买柜子，先看这 5 个死角\n入口区避坑清单"
+    );
+    expect(screen.getAllByText("家居收纳").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("账号主体区")).toHaveValue("家居收纳");
+    expect(screen.getByLabelText("主体区")).toHaveValue("家居收纳");
+    expect(screen.getByText("租房收纳别急着买柜子，先看这 5 个死角")).toBeInTheDocument();
+  });
+
   it("uses the OpenAI positioning endpoint when OpenAI generation mode is selected", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockResolvedValue({

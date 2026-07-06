@@ -29,6 +29,10 @@ function getInitialPositioningInput(params: SearchParams): AccountPositioningInp
   };
 }
 
+function getInitialHomepageText(params: SearchParams) {
+  return firstParam(params, "homepageText")?.trim() || undefined;
+}
+
 export default async function Home({
   searchParams,
 }: {
@@ -36,5 +40,10 @@ export default async function Home({
 }) {
   const params = !isStaticExport && searchParams ? await searchParams : {};
 
-  return <XhsOpsApp initialPositioningInput={getInitialPositioningInput(params)} />;
+  return (
+    <XhsOpsApp
+      initialPositioningInput={getInitialPositioningInput(params)}
+      initialHomepageText={getInitialHomepageText(params)}
+    />
+  );
 }

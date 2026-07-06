@@ -20,12 +20,18 @@ import {
 import NextImage from "next/image";
 import { useMemo, useState, type FormEvent } from "react";
 import { filterBenchmarkCandidates, generateAccountPositioning } from "@/lib/core/account";
+import {
+  analyzeAccountHomepage,
+  buildPositioningInputFromHomepage,
+} from "@/lib/core/account-homepage";
 import { analyzeBenchmarkNote } from "@/lib/core/benchmark";
 import { scanCompliance } from "@/lib/core/compliance";
 import { generateDraftFromTopic } from "@/lib/core/content";
 import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/publish";
 import { generateTopicCandidates } from "@/lib/core/topic";
 import type {
+  AccountHomepageAnalysis,
+  AccountHomepageInput,
   AccountPositioning,
   AccountPositioningInput,
   BenchmarkContentFormat,
@@ -55,7 +61,16 @@ interface GeneratedPoster {
 
 interface XhsOpsAppProps {
   initialPositioningInput?: AccountPositioningInput;
+  initialHomepageText?: string;
 }
+
+const demoHomepageText = [
+  "护肤自查室",
+  "给25-35 岁的成分护肤新手做护肤决策辅助，把复杂成分翻译成能执行的日常判断。",
+  "敏感肌修护别乱买，先看这 4 个成分",
+  "油敏肌早八护肤流程，3 分钟出门",
+  "同价位修护精华怎么选：3 个维度对比",
+].join("\n");
 
 const workspaceNav = [
   { label: "Positioning", icon: Compass },
@@ -77,6 +92,20 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     throw new Error(payload.error ?? `Request failed with HTTP ${response.status}`);
   }
   return payload as T;
+}
+
+function parseHomepageText(rawText: string, projectId: string): AccountHomepageInput {
+  const lines = rawText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    projectId,
+    displayName: lines[0] ?? "未命名账号",
+    bio: lines[1] ?? lines[0] ?? "未填写简介",
+    recentNotesText: lines.slice(2).join("\n") || lines.join("\n") || "未提供近期笔记",
+  };
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -140,14 +169,25 @@ function RiskBadge({ level }: { level: "low" | "medium" | "high" }) {
   return <span className={`rounded-md px-2.5 py-1 text-sm font-semibold ${color}`}>{labels[level]}</span>;
 }
 
-export function XhsOpsApp({ initialPositioningInput }: XhsOpsAppProps = {}) {
-  const initialPositioning = initialPositioningInput
-    ? generateAccountPositioning(initialPositioningInput)
+export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsOpsAppProps = {}) {
+  const initialHomepageAnalysis = initialHomepageText
+    ? analyzeAccountHomepage(parseHomepageText(initialHomepageText, demoProject.id))
+    : null;
+  const derivedPositioningInput =
+    initialPositioningInput ??
+    (initialHomepageAnalysis ? buildPositioningInputFromHomepage(initialHomepageAnalysis) : undefined);
+  const initialPositioning = derivedPositioningInput
+    ? generateAccountPositioning(derivedPositioningInput)
     : demoAccountPositioning;
-  const initialAiStatus = initialPositioningInput ? "本地模板已生成" : "本地模板模式";
+  const initialAiStatus = initialHomepageAnalysis
+    ? "本地模板已分析主页"
+    : initialPositioningInput
+      ? "本地模板已生成"
+      : "本地模板模式";
   const [generationMode, setGenerationMode] = useState<GenerationMode>("local");
   const [aiStatus, setAiStatus] = useState(initialAiStatus);
   const [isGeneratingPositioning, setIsGeneratingPositioning] = useState(false);
+  const [isAnalyzingHomepage, setIsAnalyzingHomepage] = useState(false);
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
@@ -158,6 +198,9 @@ export function XhsOpsApp({ initialPositioningInput }: XhsOpsAppProps = {}) {
   const [accountTone, setAccountTone] = useState(initialPositioning.tone);
   const [accountPositioning, setAccountPositioning] =
     useState<AccountPositioning>(initialPositioning);
+  const [rawHomepageText, setRawHomepageText] = useState(initialHomepageText ?? demoHomepageText);
+  const [homepageAnalysis, setHomepageAnalysis] =
+    useState<AccountHomepageAnalysis | null>(initialHomepageAnalysis);
   const [benchmarkSubjectArea, setBenchmarkSubjectArea] = useState(
     initialPositioning.benchmarkFilters.subjectArea
   );
@@ -245,6 +288,51 @@ export function XhsOpsApp({ initialPositioningInput }: XhsOpsAppProps = {}) {
   async function handlePositioningSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await handleGeneratePositioning();
+  }
+
+  async function handleAnalyzeHomepage() {
+    const profile = parseHomepageText(rawHomepageText, demoProject.id);
+
+    if (generationMode === "local") {
+      setHomepageAnalysis(analyzeAccountHomepage(profile));
+      setAiStatus("本地模板已分析主页");
+      return;
+    }
+
+    setIsAnalyzingHomepage(true);
+    setAiStatus("OpenAI 正在分析主页");
+    try {
+      const payload = await postJson<{
+        analysis: AccountHomepageAnalysis;
+        positioningInput: AccountPositioningInput;
+      }>("/api/ai/account-analysis/", {
+        project: demoProject,
+        profile,
+      });
+      setHomepageAnalysis(payload.analysis);
+      setAiStatus("OpenAI 已分析主页");
+    } catch (error) {
+      setHomepageAnalysis(analyzeAccountHomepage(profile));
+      setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
+    } finally {
+      setIsAnalyzingHomepage(false);
+    }
+  }
+
+  async function handleHomepageSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await handleAnalyzeHomepage();
+  }
+
+  function handleApplyHomepageAnalysis() {
+    if (!homepageAnalysis) return;
+    const input = buildPositioningInputFromHomepage(homepageAnalysis);
+    setSubjectArea(input.subjectArea);
+    setAccountAudience(input.audience);
+    setDifferentiator(input.differentiator);
+    setAccountTone(input.tone);
+    applyPositioning(generateAccountPositioning(input));
+    setAiStatus("主页分析已应用到定位");
   }
 
   async function handleGenerateTopics() {
@@ -559,6 +647,103 @@ export function XhsOpsApp({ initialPositioningInput }: XhsOpsAppProps = {}) {
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+              <form
+                id="homepage-analysis-form"
+                aria-label="账号主页分析"
+                method="get"
+                onSubmit={handleHomepageSubmit}
+                className="rounded-lg border border-[#D8D2C1] bg-white p-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-[#6D6A61]">Homepage Analyzer</p>
+                    <h3 className="mt-1 text-lg font-semibold text-[#1F2723]">账号主页分析</h3>
+                  </div>
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white disabled:opacity-60"
+                    form="homepage-analysis-form"
+                    type="submit"
+                    disabled={isAnalyzingHomepage}
+                  >
+                    <Search size={16} />
+                    分析主页
+                  </button>
+                </div>
+                <label className="mt-4 grid gap-1 text-sm font-medium text-[#3B403C]">
+                  账号主页资料
+                  <textarea
+                    className="min-h-40 rounded-md border border-[#CFC7B5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#2E6B5F]"
+                    name="homepageText"
+                    required
+                    value={rawHomepageText}
+                    onChange={(event) => setRawHomepageText(event.target.value)}
+                  />
+                </label>
+              </form>
+
+              <div className="rounded-lg border border-[#D8D2C1] bg-white p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-[#6D6A61]">主页诊断</p>
+                    <h3 className="mt-1 text-xl font-semibold">
+                      {homepageAnalysis?.inferredSubjectArea ?? "等待分析"}
+                    </h3>
+                  </div>
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-[#2E6B5F] bg-white px-3 text-sm font-semibold text-[#214F45] disabled:opacity-50"
+                    onClick={handleApplyHomepageAnalysis}
+                    type="button"
+                    disabled={!homepageAnalysis}
+                  >
+                    <Check size={16} />
+                    应用到定位
+                  </button>
+                </div>
+
+                {homepageAnalysis ? (
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="rounded-md bg-[#F8F3E7] p-3">
+                      <p className="text-xs font-semibold uppercase text-[#6D6A61]">人群</p>
+                      <p className="mt-1 text-sm font-medium">{homepageAnalysis.inferredAudience}</p>
+                    </div>
+                    <div className="rounded-md bg-[#F8F3E7] p-3">
+                      <p className="text-xs font-semibold uppercase text-[#6D6A61]">主页健康度</p>
+                      <p className="mt-1 text-sm font-medium">{homepageAnalysis.profileHealthScore}/100</p>
+                    </div>
+                    <div className="rounded-md bg-[#F8F3E7] p-3 md:col-span-2">
+                      <p className="text-xs font-semibold uppercase text-[#6D6A61]">差异化价值</p>
+                      <p className="mt-1 text-sm leading-6">{homepageAnalysis.valuePromise}</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <p className="text-xs font-semibold uppercase text-[#6D6A61]">内容支柱</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {homepageAnalysis.contentPillars.map((pillar) => (
+                          <span key={pillar} className="rounded-md bg-[#E4F1E8] px-2.5 py-1 text-sm text-[#214F45]">
+                            {pillar}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <p className="text-xs font-semibold uppercase text-[#6D6A61]">下一步</p>
+                      <ul className="mt-2 grid gap-2 text-sm leading-6 text-[#3B403C]">
+                        {homepageAnalysis.nextActions.map((action) => (
+                          <li key={action} className="rounded-md border border-[#D8D2C1] px-3 py-2">
+                            {action}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-4 rounded-md bg-[#F8F3E7] p-3 text-sm leading-6 text-[#6D6A61]">
+                    粘贴账号名称、简介和近期笔记标题后，可以判断主体区、人群、内容支柱和下一步对标筛选方向。
+                  </p>
+                )}
               </div>
             </div>
           </section>

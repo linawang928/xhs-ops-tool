@@ -43,6 +43,36 @@ export interface AccountPositioning {
   createdAt: string;
 }
 
+export interface AccountHomepageInput {
+  projectId: string;
+  profileUrl?: string;
+  displayName: string;
+  bio: string;
+  recentNotesText: string;
+}
+
+export interface AccountHomepageAnalysis {
+  id: string;
+  projectId: string;
+  profileUrl?: string;
+  displayName: string;
+  inferredSubjectArea: string;
+  inferredAudience: string;
+  valuePromise: string;
+  toneKeywords: string[];
+  contentPillars: string[];
+  benchmarkFilters: {
+    subjectArea: string;
+    contentFormats: BenchmarkContentFormat[];
+  };
+  strengths: string[];
+  risks: string[];
+  opportunities: string[];
+  nextActions: string[];
+  profileHealthScore: number;
+  createdAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
