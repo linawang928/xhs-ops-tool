@@ -23,25 +23,42 @@ pnpm dev
 
 ## OpenAI 生成配置
 
-本地 OpenAI 模式通过 Next.js API Route 调用服务端环境变量，不会把 API Key 发送到浏览器或落库。
+页面顶部把“生成模式”切到 `OpenAI GPT` 后，可以选择两种连接方式。
+
+### 服务器后端
+
+本地 `pnpm dev` 或未来托管到支持 Next.js API Route 的平台时，建议使用服务器后端模式。API Key 只放在服务端环境变量里，不会进入浏览器或工作区导出文件。
 
 1. 在 `.env.local` 填入 `OPENAI_API_KEY`。
 2. 默认文本模型为 `OPENAI_TEXT_MODEL=gpt-5.5`。
 3. 默认图片模型为 `OPENAI_IMAGE_MODEL=gpt-image-2`。
-4. 启动 `pnpm dev` 后，在页面顶部把“生成模式”切到 `OpenAI GPT`。
+4. 启动 `pnpm dev` 后，在页面顶部把“OpenAI 连接方式”设为 `服务器后端`。
 
 右侧 `Provider Slots` 会显示当前后端是否检测到 `OPENAI_API_KEY`，以及文本模型和 GPT Image 2 图片模型是否可用。
 
+### 浏览器直连/代理
+
+GitHub Pages 是静态站，不能执行 Next.js API Route。个人可信环境下，可以在页面顶部把“OpenAI 连接方式”设为 `浏览器直连/代理`，填写：
+
+- `OpenAI API Key`
+- `OpenAI Base URL`
+- `文案模型`
+- `图片模型`
+
+这些设置只保存在当前浏览器的 `localStorage` 里，不会写入工作区 JSON 导出。多人或公开生产环境仍建议使用服务器后端模式，避免在浏览器里暴露 API Key。
+
 可用的 OpenAI 功能：
 
-- 账号定位：调用 `/api/ai/positioning`
-- 爆款选题：调用 `/api/ai/topics`
-- 图文文案：调用 `/api/ai/draft`
-- 海报图：调用 `/api/ai/poster`，使用 `gpt-image-2` 和 `output_format=png`，返回浏览器可预览、可下载的 data URL
+- 账号定位：生成账号名、简介、定位语、内容支柱
+- 爆款选题：生成候选选题、角度和评分理由
+- 图文文案：生成标题、正文、话题和卡片脚本
+- 主页分析：从账号主页资料推断主体区、人群和对标筛选条件
+- 合规改写：保留信息价值，改成更克制的发布表达
+- 海报图：使用 `gpt-image-2` 和 `output_format=png` 生成浏览器可预览、可下载的 3:4 PNG
 
-没有 API Key 时也可以点击“生成海报”，系统会使用本地 SVG 模板为每张卡片生成 3:4 海报，并同步到发布包的素材清单。
+服务器后端模式会走 `/api/ai/*` 路由；浏览器直连/代理模式会复用同一套生成提示词和结构化 schema，直接请求配置的 OpenAI Base URL。
 
-GitHub Pages 只能托管静态页面，不能保存 API Key 或执行服务端 GPT 调用。真实 GPT 生成请用本地 `pnpm dev`，线上 Pages 版本保留工作台界面和本地模板 fallback。
+没有 API Key 或请求失败时也可以点击“生成海报”，系统会使用本地 SVG 模板为每张卡片生成 3:4 海报，并同步到发布包的素材清单。
 
 ## 常用脚本
 

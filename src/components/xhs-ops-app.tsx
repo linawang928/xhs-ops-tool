@@ -22,6 +22,15 @@ import {
 import NextImage from "next/image";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AiProviderStatusPayload } from "@/lib/ai/status";
+import {
+  analyzeXhsAccountHomepageWithOpenAI,
+  generateXhsDraftWithOpenAI,
+  generateXhsPositioningWithOpenAI,
+  generateXhsPosterWithOpenAI,
+  generateXhsTopicsWithOpenAI,
+  rewriteXhsComplianceWithOpenAI,
+  type OpenAiGenerationSettings,
+} from "@/lib/ai/xhs-generation";
 import { filterBenchmarkCandidates, generateAccountPositioning } from "@/lib/core/account";
 import {
   analyzeAccountHomepage,
@@ -64,6 +73,7 @@ import {
 } from "@/lib/sample-data";
 
 type GenerationMode = "local" | "openai";
+type AiTransport = "server" | "browser";
 
 interface XhsOpsAppProps {
   initialPositioningInput?: AccountPositioningInput;
@@ -91,7 +101,11 @@ const workspaceNav = [
 
 const PROJECT_STORAGE_KEY = "xhs-ops-project";
 const WORKSPACE_STORAGE_KEY = "xhs-ops-workspace";
+const OPENAI_SETTINGS_STORAGE_KEY = "xhs-ops-openai-settings";
 const WORKSPACE_EXPORT_VERSION = 1;
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_OPENAI_TEXT_MODEL = "gpt-5.5";
+const DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2";
 
 type ProjectFormState = {
   name: string;
@@ -101,6 +115,14 @@ type ProjectFormState = {
   audience: string;
   forbiddenWords: string;
   brandColors: string;
+};
+
+type OpenAiSettingsFormState = {
+  transport: AiTransport;
+  apiKey: string;
+  baseUrl: string;
+  textModel: string;
+  imageModel: string;
 };
 
 interface PositioningWorkspace {
@@ -185,8 +207,8 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 function providerStatusFromPayload(payload: Partial<AiProviderStatusPayload>): ProviderStatus {
-  const textModel = payload.textModel ?? "gpt-5.5";
-  const imageModel = payload.imageModel ?? "gpt-image-2";
+  const textModel = payload.textModel ?? DEFAULT_OPENAI_TEXT_MODEL;
+  const imageModel = payload.imageModel ?? DEFAULT_OPENAI_IMAGE_MODEL;
 
   if (payload.serverApiAvailable && payload.hasOpenAIKey) {
     return {
@@ -278,6 +300,36 @@ function projectFromForm(form: ProjectFormState, previous: Project): Project {
   };
 }
 
+function defaultOpenAiSettings(): OpenAiSettingsFormState {
+  return {
+    transport: "server",
+    apiKey: "",
+    baseUrl: DEFAULT_OPENAI_BASE_URL,
+    textModel: DEFAULT_OPENAI_TEXT_MODEL,
+    imageModel: DEFAULT_OPENAI_IMAGE_MODEL,
+  };
+}
+
+function normalizeOpenAiSettings(settings: OpenAiSettingsFormState): OpenAiSettingsFormState {
+  return {
+    transport: settings.transport,
+    apiKey: settings.apiKey.trim(),
+    baseUrl: settings.baseUrl.trim().replace(/\/$/, "") || DEFAULT_OPENAI_BASE_URL,
+    textModel: settings.textModel.trim() || DEFAULT_OPENAI_TEXT_MODEL,
+    imageModel: settings.imageModel.trim() || DEFAULT_OPENAI_IMAGE_MODEL,
+  };
+}
+
+function toOpenAiGenerationSettings(settings: OpenAiSettingsFormState): OpenAiGenerationSettings {
+  const normalized = normalizeOpenAiSettings(settings);
+  return {
+    apiKey: normalized.apiKey,
+    baseUrl: normalized.baseUrl,
+    textModel: normalized.textModel,
+    imageModel: normalized.imageModel,
+  };
+}
+
 function isProject(value: unknown): value is Project {
   const project = value as Partial<Project>;
   return Boolean(
@@ -290,6 +342,18 @@ function isProject(value: unknown): value is Project {
       typeof project.audience === "string" &&
       Array.isArray(project.forbiddenWords) &&
       Array.isArray(project.brandColors)
+  );
+}
+
+function isOpenAiSettings(value: unknown): value is OpenAiSettingsFormState {
+  const settings = value as Partial<OpenAiSettingsFormState>;
+  return Boolean(
+    settings &&
+      (settings.transport === "server" || settings.transport === "browser") &&
+      typeof settings.apiKey === "string" &&
+      typeof settings.baseUrl === "string" &&
+      typeof settings.textModel === "string" &&
+      typeof settings.imageModel === "string"
   );
 }
 
@@ -446,6 +510,26 @@ function readStoredProject() {
 function writeStoredProject(project: Project) {
   if (typeof window === "undefined" || !window.localStorage) return;
   window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(project));
+}
+
+function readStoredOpenAiSettings() {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(OPENAI_SETTINGS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isOpenAiSettings(parsed) ? normalizeOpenAiSettings(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredOpenAiSettings(settings: OpenAiSettingsFormState) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  window.localStorage.setItem(
+    OPENAI_SETTINGS_STORAGE_KEY,
+    JSON.stringify(normalizeOpenAiSettings(settings))
+  );
 }
 
 function readStoredWorkspace() {
@@ -782,6 +866,7 @@ export function XhsOpsApp({
   const shouldLoadStoredWorkspace = !initialPositioningInput && !initialHomepageText;
   const storedWorkspaceAtRender = shouldLoadStoredWorkspace ? readStoredWorkspace() : null;
   const storedProjectAtRender = readStoredProject();
+  const storedOpenAiSettingsAtRender = readStoredOpenAiSettings();
   const initialProject = storedWorkspaceAtRender?.project ?? storedProjectAtRender ?? demoProject;
   const initialHomepageAnalysis = storedWorkspaceAtRender?.homepageAnalysis ?? (initialHomepageText
     ? analyzeAccountHomepage(parseHomepageText(initialHomepageText, initialProject.id))
@@ -832,6 +917,14 @@ export function XhsOpsApp({
     storedWorkspaceAtRender?.generationMode ?? "local"
   );
   const [aiStatus, setAiStatus] = useState(initialAiStatus);
+  const [openAiSettings, setOpenAiSettings] = useState<OpenAiSettingsFormState>(
+    storedOpenAiSettingsAtRender ?? defaultOpenAiSettings()
+  );
+  const [openAiSettingsStatus, setOpenAiSettingsStatus] = useState(
+    storedOpenAiSettingsAtRender?.transport === "browser" && storedOpenAiSettingsAtRender.apiKey
+      ? "浏览器直连已配置"
+      : "服务器后端优先"
+  );
   const [providerStatus, setProviderStatus] = useState<ProviderStatus>(
     initialProviderStatus ? providerStatusFromPayload(initialProviderStatus) : defaultProviderStatus
   );
@@ -934,6 +1027,22 @@ export function XhsOpsApp({
       }),
     [accountPositioning, benchmarkFormat, benchmarkSubjectArea]
   );
+  const normalizedOpenAiSettings = useMemo(
+    () => normalizeOpenAiSettings(openAiSettings),
+    [openAiSettings]
+  );
+  const activeProviderStatus: ProviderStatus =
+    generationMode === "openai" && normalizedOpenAiSettings.transport === "browser"
+      ? {
+          kind: normalizedOpenAiSettings.apiKey ? "ready" : "missing-key",
+          label: normalizedOpenAiSettings.apiKey ? "浏览器直连已配置" : "浏览器直连未配置",
+          detail: normalizedOpenAiSettings.apiKey
+            ? "当前 OpenAI 操作会用浏览器端设置或自定义代理发起请求。"
+            : "填写并保存 OpenAI API Key 后，可在静态页面中调用 GPT 和图片模型。",
+          textModel: `Text ${normalizedOpenAiSettings.textModel}`,
+          imageModel: `Image ${normalizedOpenAiSettings.imageModel}`,
+        }
+      : providerStatus;
 
   const createWorkspaceSnapshot = useCallback((): StoredWorkspaceSnapshot => {
     return {
@@ -1229,6 +1338,39 @@ export function XhsOpsApp({
     setAiStatus("项目设置已更新");
   }
 
+  function handleOpenAiSettingsChange(field: keyof OpenAiSettingsFormState, value: string) {
+    setOpenAiSettings((settings) => ({
+      ...settings,
+      [field]: field === "transport" ? (value as AiTransport) : value,
+    }));
+    setOpenAiSettingsStatus("OpenAI 设置未保存");
+  }
+
+  function handleSaveOpenAiSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = normalizeOpenAiSettings(openAiSettings);
+    setOpenAiSettings(normalized);
+    writeStoredOpenAiSettings(normalized);
+    setOpenAiSettingsStatus(
+      normalized.transport === "browser" && normalized.apiKey
+        ? "浏览器直连已配置"
+        : "服务器后端优先"
+    );
+    setAiStatus(normalized.transport === "browser" ? "OpenAI 浏览器直连模式" : "OpenAI 后端模式");
+  }
+
+  function currentOpenAiSettings() {
+    const normalized = normalizeOpenAiSettings(openAiSettings);
+    if (normalized.transport === "browser" && !normalized.apiKey) {
+      throw new Error("请先填写 OpenAI API Key");
+    }
+    return toOpenAiGenerationSettings(normalized);
+  }
+
+  function shouldUseBrowserOpenAi() {
+    return generationMode === "openai" && openAiSettings.transport === "browser";
+  }
+
   async function handleGeneratePositioning() {
     const input = {
       projectId: project.id,
@@ -1247,9 +1389,18 @@ export function XhsOpsApp({
     setIsGeneratingPositioning(true);
     setAiStatus("OpenAI 正在生成定位");
     try {
-      const payload = await postJson<{ positioning: AccountPositioning }>("/api/ai/positioning/", input);
-      applyPositioning(payload.positioning);
-      setAiStatus("OpenAI 已生成定位");
+      if (shouldUseBrowserOpenAi()) {
+        const positioning = await generateXhsPositioningWithOpenAI({
+          ...input,
+          settings: currentOpenAiSettings(),
+        });
+        applyPositioning(positioning);
+        setAiStatus("浏览器 OpenAI 已生成定位");
+      } else {
+        const payload = await postJson<{ positioning: AccountPositioning }>("/api/ai/positioning/", input);
+        applyPositioning(payload.positioning);
+        setAiStatus("OpenAI 已生成定位");
+      }
     } catch (error) {
       applyPositioning(generateAccountPositioning(input));
       setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
@@ -1275,15 +1426,25 @@ export function XhsOpsApp({
     setIsAnalyzingHomepage(true);
     setAiStatus("OpenAI 正在分析主页");
     try {
-      const payload = await postJson<{
-        analysis: AccountHomepageAnalysis;
-        positioningInput: AccountPositioningInput;
-      }>("/api/ai/account-analysis/", {
-        project,
-        profile,
-      });
-      setHomepageAnalysis(payload.analysis);
-      setAiStatus("OpenAI 已分析主页");
+      if (shouldUseBrowserOpenAi()) {
+        const payload = await analyzeXhsAccountHomepageWithOpenAI({
+          project,
+          profile,
+          settings: currentOpenAiSettings(),
+        });
+        setHomepageAnalysis(payload.analysis);
+        setAiStatus("浏览器 OpenAI 已分析主页");
+      } else {
+        const payload = await postJson<{
+          analysis: AccountHomepageAnalysis;
+          positioningInput: AccountPositioningInput;
+        }>("/api/ai/account-analysis/", {
+          project,
+          profile,
+        });
+        setHomepageAnalysis(payload.analysis);
+        setAiStatus("OpenAI 已分析主页");
+      }
     } catch (error) {
       setHomepageAnalysis(analyzeAccountHomepage(profile));
       setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
@@ -1320,14 +1481,22 @@ export function XhsOpsApp({
     setIsGeneratingTopics(true);
     setAiStatus("OpenAI 正在检索选题");
     try {
-      const payload = await postJson<{ topics: TopicCandidate[] }>("/api/ai/topics/", {
-        keyword,
-        project,
-      });
-      const nextTopics = payload.topics.length > 0 ? payload.topics : generateTopicCandidates(keyword, project);
+      const generatedTopics = shouldUseBrowserOpenAi()
+        ? await generateXhsTopicsWithOpenAI({
+            keyword,
+            project,
+            settings: currentOpenAiSettings(),
+          })
+        : (
+            await postJson<{ topics: TopicCandidate[] }>("/api/ai/topics/", {
+              keyword,
+              project,
+            })
+          ).topics;
+      const nextTopics = generatedTopics.length > 0 ? generatedTopics : generateTopicCandidates(keyword, project);
       setTopics(nextTopics);
       setSelectedTopicId(nextTopics[0].id);
-      setAiStatus("OpenAI 已生成选题");
+      setAiStatus(shouldUseBrowserOpenAi() ? "浏览器 OpenAI 已生成选题" : "OpenAI 已生成选题");
     } catch (error) {
       const nextTopics = generateTopicCandidates(keyword, project);
       setTopics(nextTopics);
@@ -1365,13 +1534,23 @@ export function XhsOpsApp({
       setIsGeneratingDraft(true);
       setAiStatus("OpenAI 正在生成文案");
       try {
-        const payload = await postJson<{ draft: ContentDraft }>("/api/ai/draft/", {
-          project,
-          topic: selectedTopic,
-          benchmarks: [benchmark],
-        });
-        nextDraft = payload.draft;
-        setAiStatus("OpenAI 已生成文案");
+        if (shouldUseBrowserOpenAi()) {
+          nextDraft = await generateXhsDraftWithOpenAI({
+            project,
+            topic: selectedTopic,
+            benchmarks: [benchmark],
+            settings: currentOpenAiSettings(),
+          });
+          setAiStatus("浏览器 OpenAI 已生成文案");
+        } else {
+          const payload = await postJson<{ draft: ContentDraft }>("/api/ai/draft/", {
+            project,
+            topic: selectedTopic,
+            benchmarks: [benchmark],
+          });
+          nextDraft = payload.draft;
+          setAiStatus("OpenAI 已生成文案");
+        }
       } catch (error) {
         setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
       } finally {
@@ -1408,15 +1587,24 @@ export function XhsOpsApp({
     setIsGeneratingPoster(true);
     setAiStatus("OpenAI 正在生成海报");
     try {
-      const payload = await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
-        project,
-        draft,
-        cardId: draft.assetCards[0]?.id,
-      });
+      const image = shouldUseBrowserOpenAi()
+        ? await generateXhsPosterWithOpenAI({
+            project,
+            draft,
+            cardId: draft.assetCards[0]?.id,
+            settings: currentOpenAiSettings(),
+          })
+        : (
+            await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
+              project,
+              draft,
+              cardId: draft.assetCards[0]?.id,
+            })
+          ).image;
       setPosterImages((images) => {
         const nextImages = [
-          payload.image,
-          ...images.filter((image) => image.cardId !== payload.image.cardId),
+          image,
+          ...images.filter((item) => item.cardId !== image.cardId),
         ].slice(0, 4);
         setPublishTask((task) => ({
           ...task,
@@ -1425,7 +1613,7 @@ export function XhsOpsApp({
         }));
         return nextImages;
       });
-      setAiStatus("OpenAI 已生成海报");
+      setAiStatus(shouldUseBrowserOpenAi() ? "浏览器 OpenAI 已生成海报" : "OpenAI 已生成海报");
     } catch (error) {
       const templatePosters = createTemplatePosterAssets(draft, project);
       syncPosterAssets(templatePosters);
@@ -1449,15 +1637,21 @@ export function XhsOpsApp({
     setIsRewritingCompliance(true);
     setAiStatus("OpenAI 正在合规改写");
     try {
-      const payload = await postJson<{
-        rewrittenText: string;
-        changeNotes: string[];
-      }>("/api/ai/compliance-rewrite/", {
-        project,
-        text: scanText,
-      });
+      const payload = shouldUseBrowserOpenAi()
+        ? await rewriteXhsComplianceWithOpenAI({
+            project,
+            text: scanText,
+            settings: currentOpenAiSettings(),
+          })
+        : await postJson<{
+            rewrittenText: string;
+            changeNotes: string[];
+          }>("/api/ai/compliance-rewrite/", {
+            project,
+            text: scanText,
+          });
       setScanText(payload.rewrittenText);
-      setAiStatus("OpenAI 已合规改写");
+      setAiStatus(shouldUseBrowserOpenAi() ? "浏览器 OpenAI 已合规改写" : "OpenAI 已合规改写");
     } catch (error) {
       setScanText(compliance.sanitizedText);
       setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
@@ -1571,6 +1765,77 @@ export function XhsOpsApp({
               {aiStatus}
             </div>
           </div>
+          {generationMode === "openai" && (
+            <form
+              aria-label="OpenAI 设置"
+              className="grid gap-3 rounded-md border border-[#D8D2C1] bg-white p-3 lg:grid-cols-[180px_minmax(220px,1fr)_minmax(220px,1fr)_140px_150px_auto]"
+              onSubmit={handleSaveOpenAiSettings}
+            >
+              <label className="grid gap-1 text-xs font-semibold uppercase text-[#6D6A61]">
+                OpenAI 连接方式
+                <select
+                  aria-label="OpenAI 连接方式"
+                  className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                  value={openAiSettings.transport}
+                  onChange={(event) => handleOpenAiSettingsChange("transport", event.target.value)}
+                >
+                  <option value="server">服务器后端</option>
+                  <option value="browser">浏览器直连/代理</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase text-[#6D6A61]">
+                OpenAI API Key
+                <input
+                  aria-label="OpenAI API Key"
+                  autoComplete="off"
+                  className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F] disabled:bg-[#F8F3E7] disabled:text-[#6D6A61]"
+                  disabled={openAiSettings.transport !== "browser"}
+                  type="password"
+                  value={openAiSettings.apiKey}
+                  onChange={(event) => handleOpenAiSettingsChange("apiKey", event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase text-[#6D6A61]">
+                OpenAI Base URL
+                <input
+                  aria-label="OpenAI Base URL"
+                  className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F] disabled:bg-[#F8F3E7] disabled:text-[#6D6A61]"
+                  disabled={openAiSettings.transport !== "browser"}
+                  value={openAiSettings.baseUrl}
+                  onChange={(event) => handleOpenAiSettingsChange("baseUrl", event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase text-[#6D6A61]">
+                文案模型
+                <input
+                  aria-label="文案模型"
+                  className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                  value={openAiSettings.textModel}
+                  onChange={(event) => handleOpenAiSettingsChange("textModel", event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase text-[#6D6A61]">
+                图片模型
+                <input
+                  aria-label="图片模型"
+                  className="h-10 rounded-md border border-[#CFC7B5] bg-white px-3 text-sm font-medium normal-case text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                  value={openAiSettings.imageModel}
+                  onChange={(event) => handleOpenAiSettingsChange("imageModel", event.target.value)}
+                />
+              </label>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase text-[#6D6A61]">OpenAI 状态</span>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white"
+                  type="submit"
+                >
+                  <Check size={16} />
+                  保存 OpenAI 设置
+                </button>
+                <span className="text-xs font-medium text-[#6D6A61]">{openAiSettingsStatus}</span>
+              </div>
+            </form>
+          )}
           <div className="grid gap-3 rounded-md border border-[#D8D2C1] bg-white p-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -2463,12 +2728,12 @@ export function XhsOpsApp({
           <div className="rounded-lg border border-[#D8D2C1] bg-white p-5">
             <p className="text-xs font-semibold uppercase text-[#6D6A61]">Provider Slots</p>
             <div className="mt-4 grid gap-2 text-sm">
-              <div className={`rounded-md px-3 py-2 ${providerStatusClass(providerStatus.kind)}`}>
+              <div className={`rounded-md px-3 py-2 ${providerStatusClass(activeProviderStatus.kind)}`}>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-semibold">{providerStatus.label}</span>
+                  <span className="font-semibold">{activeProviderStatus.label}</span>
                   <span className="text-xs font-semibold uppercase">GPT</span>
                 </div>
-                <p className="mt-1 text-xs leading-5">{providerStatus.detail}</p>
+                <p className="mt-1 text-xs leading-5">{activeProviderStatus.detail}</p>
               </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>SourceProvider</span>
@@ -2476,11 +2741,11 @@ export function XhsOpsApp({
               </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>LLMProvider</span>
-                <span className="font-semibold text-[#74530C]">{providerStatus.textModel}</span>
+                <span className="font-semibold text-[#74530C]">{activeProviderStatus.textModel}</span>
               </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>ImageProvider</span>
-                <span className="font-semibold text-[#74530C]">{providerStatus.imageModel}</span>
+                <span className="font-semibold text-[#74530C]">{activeProviderStatus.imageModel}</span>
               </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>PublisherAdapter</span>

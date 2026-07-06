@@ -450,6 +450,79 @@ describe("home dashboard", () => {
     );
   });
 
+  it("saves browser OpenAI settings separately and keeps the API key out of workspace exports", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
+    await user.selectOptions(screen.getByLabelText("OpenAI 连接方式"), "browser");
+    await user.clear(screen.getByLabelText("OpenAI API Key"));
+    await user.type(screen.getByLabelText("OpenAI API Key"), "sk-browser-secret");
+    await user.clear(screen.getByLabelText("OpenAI Base URL"));
+    await user.type(screen.getByLabelText("OpenAI Base URL"), "https://api.openai.test/v1");
+    await user.click(screen.getByRole("button", { name: "保存 OpenAI 设置" }));
+    await user.click(screen.getByRole("button", { name: "导出工作区" }));
+
+    expect(screen.getAllByText("浏览器直连已配置").length).toBeGreaterThan(0);
+    expect(JSON.parse(window.localStorage.getItem("xhs-ops-openai-settings") ?? "{}")).toMatchObject({
+      transport: "browser",
+      apiKey: "sk-browser-secret",
+      baseUrl: "https://api.openai.test/v1",
+    });
+    expect((screen.getByLabelText("工作区 JSON") as HTMLTextAreaElement).value).not.toContain(
+      "sk-browser-secret"
+    );
+  });
+
+  it("uses browser OpenAI settings for poster generation without calling the static API route", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === "/api/ai/status/") {
+        return {
+          ok: false,
+          json: async () => ({ error: "static preview" }),
+        };
+      }
+      if (url === "https://api.openai.test/v1/images/generations") {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{ b64_json: "browser-poster-base64", revised_prompt: "browser xhs poster" }],
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderHome();
+
+    await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
+    await user.selectOptions(screen.getByLabelText("OpenAI 连接方式"), "browser");
+    await user.clear(screen.getByLabelText("OpenAI API Key"));
+    await user.type(screen.getByLabelText("OpenAI API Key"), "sk-browser-secret");
+    await user.clear(screen.getByLabelText("OpenAI Base URL"));
+    await user.type(screen.getByLabelText("OpenAI Base URL"), "https://api.openai.test/v1");
+    await user.click(screen.getByRole("button", { name: "保存 OpenAI 设置" }));
+    await user.click(screen.getByRole("button", { name: "生成海报" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.openai.test/v1/images/generations",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer sk-browser-secret" }),
+        body: expect.stringContaining('"gpt-image-2"'),
+      })
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/ai/poster/",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(await screen.findByRole("img", { name: "browser xhs poster" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,browser-poster-base64"
+    );
+  });
+
   it("generates downloadable template poster images in local mode", async () => {
     const user = userEvent.setup();
     await renderHome();
