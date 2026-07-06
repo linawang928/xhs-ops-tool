@@ -31,4 +31,13 @@ describe("compliance guard", () => {
       category: "custom_forbidden",
     });
   });
+
+  it("keeps specific built-in replacements when custom forbidden words duplicate base rules", () => {
+    const result = scanCompliance("全网最低，7天瘦10斤。", ["全网最低"]);
+
+    expect(result.issues.map((issue) => issue.category)).toEqual(
+      expect.arrayContaining(["custom_forbidden", "absolute_claim", "unrealistic_promise"])
+    );
+    expect(result.sanitizedText).toBe("近期价格友好，记录阶段性变化。");
+  });
 });

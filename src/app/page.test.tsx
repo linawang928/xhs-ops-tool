@@ -112,7 +112,12 @@ describe("home dashboard", () => {
       "positioning-form"
     );
     expect(screen.getByLabelText("账号主体区")).toHaveValue("家居收纳");
+    expect(screen.getByLabelText("选题关键词")).toHaveValue("家居收纳");
     expect(screen.getAllByRole("heading", { name: "家居收纳自查室" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("heading", { name: "家居收纳痛点避坑清单：新手先看这 5 个细节" })
+        .length
+    ).toBeGreaterThan(0);
     expect(screen.getAllByText(/租房党和小户型新手/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/低预算、可复用/).length).toBeGreaterThan(0);
   });
@@ -130,7 +135,11 @@ describe("home dashboard", () => {
     await user.clear(screen.getByLabelText("账号语气"));
     await user.type(screen.getByLabelText("账号语气"), "实用、清爽、像朋友提醒");
 
-    await user.click(screen.getByRole("button", { name: "生成定位" }));
+    const generateButton = screen.getByRole("button", { name: "生成定位" });
+    expect(generateButton).toHaveAttribute("type", "submit");
+    expect(generateButton).toHaveAttribute("form", "positioning-form");
+
+    await user.click(generateButton);
 
     expect(screen.getAllByRole("heading", { name: "家居收纳自查室" }).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/租房党和小户型新手/).length).toBeGreaterThan(0);
@@ -139,6 +148,12 @@ describe("home dashboard", () => {
     const benchmarkSubjectSelect = screen.getByLabelText("主体区");
     expect(benchmarkSubjectSelect).toHaveValue("家居收纳");
     expect(screen.getByRole("option", { name: "家居收纳" })).toBeInTheDocument();
+    expect(screen.getByLabelText("选题关键词")).toHaveValue("家居收纳");
+    expect(
+      screen.getAllByRole("heading", { name: "家居收纳痛点避坑清单：新手先看这 5 个细节" })
+        .length
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/家居收纳别急着下单/).length).toBeGreaterThan(0);
   });
 
   it("analyzes an account homepage and applies the inferred positioning to benchmark filters", async () => {
@@ -371,6 +386,47 @@ describe("home dashboard", () => {
       })
     );
     expect(screen.getByRole("button", { name: "已唤起" })).toBeInTheDocument();
+  });
+
+  it("rewrites compliance issues with the local sanitized text", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.clear(screen.getByLabelText("合规检测文本"));
+    await user.type(screen.getByLabelText("合规检测文本"), "全网最低，7天瘦10斤。");
+    await user.click(screen.getByRole("button", { name: "合规改写" }));
+
+    expect(screen.getByLabelText("合规检测文本")).toHaveValue("近期价格友好，记录阶段性变化。");
+    expect(screen.getByText("本地规则已改写")).toBeInTheDocument();
+  });
+
+  it("uses OpenAI to rewrite compliance issues when OpenAI mode is selected", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rewrittenText: "这个收纳方案对我来说更省心，适合先从入口区试起。",
+        changeNotes: ["删除绝对化承诺"],
+        compliance: { riskLevel: "low", issues: [], sanitizedText: "ok" },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderHome();
+
+    await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
+    await user.clear(screen.getByLabelText("合规检测文本"));
+    await user.type(screen.getByLabelText("合规检测文本"), "这个收纳方案不踩坑，全网最低。");
+    await user.click(screen.getByRole("button", { name: "合规改写" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai/compliance-rewrite/",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("不踩坑"),
+      })
+    );
+    expect(await screen.findByDisplayValue("这个收纳方案对我来说更省心，适合先从入口区试起。")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI 已合规改写")).toBeInTheDocument();
   });
 
   it("creates a mobile publish card link from the publish queue", async () => {

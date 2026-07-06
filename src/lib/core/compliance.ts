@@ -62,7 +62,7 @@ function collectRules(customForbiddenWords: string[]) {
     replacement: "更稳妥的表达",
   }));
 
-  return [...customRules, ...baseRules];
+  return [...baseRules, ...customRules];
 }
 
 export function scanCompliance(text: string, customForbiddenWords: string[] = []): ComplianceResult {

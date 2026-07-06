@@ -49,6 +49,7 @@ import type {
   GeneratedPosterAsset,
   PublishTask,
   Project,
+  ScoredBenchmarkCandidate,
   TopicCandidate,
 } from "@/lib/core/types";
 import {
@@ -97,6 +98,14 @@ type ProjectFormState = {
   forbiddenWords: string;
   brandColors: string;
 };
+
+interface PositioningWorkspace {
+  keyword: string;
+  topics: TopicCandidate[];
+  benchmark: BenchmarkNote;
+  draft: ContentDraft;
+  publishTask: PublishTask;
+}
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -192,6 +201,85 @@ function readStoredProject() {
 function writeStoredProject(project: Project) {
   if (typeof window === "undefined" || !window.localStorage) return;
   window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(project));
+}
+
+function projectFromPositioning(positioning: AccountPositioning, baseProject: Project): Project {
+  return {
+    ...baseProject,
+    persona: positioning.selectedBio || baseProject.persona,
+    industry: positioning.subjectArea,
+    tone: positioning.tone,
+    audience: positioning.audience,
+  };
+}
+
+function benchmarkFromCandidate(candidate: ScoredBenchmarkCandidate): BenchmarkNote {
+  const body = [
+    `${candidate.audiencePain}，这类开场适合先把用户拉进具体场景。`,
+    `1. 拆标题：${candidate.title}`,
+    `2. 拆主体：${candidate.contentFormat} / ${candidate.subjectArea}`,
+    "3. 拆互动：用评论区问题继续追选题",
+    `#${candidate.tags.join(" #")}`,
+  ].join("\n");
+
+  return analyzeBenchmarkNote({
+    id: candidate.id,
+    projectId: candidate.projectId,
+    title: candidate.title,
+    author: candidate.author,
+    body,
+    metrics: candidate.metrics,
+    importedAt: new Date().toISOString(),
+  });
+}
+
+function fallbackBenchmarkFromPositioning(positioning: AccountPositioning): BenchmarkNote {
+  const body = [
+    `${positioning.audience}最容易卡在第一步，需要先把问题放回具体使用场景。`,
+    `1. 拆主体：${positioning.subjectArea}`,
+    `2. 拆卖点：${positioning.differentiator}`,
+    "3. 拆互动：把评论区高频问题整理成下一篇选题",
+    `#${positioning.subjectArea} #避坑清单 #流程模板`,
+  ].join("\n");
+
+  return analyzeBenchmarkNote({
+    id: `bench-${positioning.id}`,
+    projectId: positioning.projectId,
+    title: `${positioning.subjectArea}账号定位参考拆解`,
+    author: "本地模板",
+    body,
+    metrics: { likes: 0, saves: 0, comments: 0 },
+    importedAt: new Date().toISOString(),
+  });
+}
+
+function workspaceFromPositioning(
+  positioning: AccountPositioning,
+  project: Project
+): PositioningWorkspace {
+  const keyword = positioning.subjectArea;
+  const topics = generateTopicCandidates(keyword, project);
+  const candidate = filterBenchmarkCandidates(demoBenchmarkCandidates, positioning, {
+    subjectArea: positioning.benchmarkFilters.subjectArea,
+    contentFormat: "全部",
+  })[0];
+  const benchmark = candidate
+    ? benchmarkFromCandidate(candidate)
+    : fallbackBenchmarkFromPositioning(positioning);
+  const draft = generateDraftFromTopic(topics[0], project, [benchmark]);
+  const publishTask = prepareManualPublishPackage(
+    draft,
+    project,
+    "2026-07-07T12:30:00.000Z"
+  );
+
+  return {
+    keyword,
+    topics,
+    benchmark,
+    draft,
+    publishTask,
+  };
 }
 
 function readMobilePublishCardFromLocation() {
@@ -409,6 +497,19 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
         differentiator: "把复杂信息翻译成能执行的日常判断",
         tone: initialProject.tone,
       });
+  const hasInitialPositioningOverride = Boolean(derivedPositioningInput);
+  const initialWorkflowProject = hasInitialPositioningOverride
+    ? projectFromPositioning(initialPositioning, initialProject)
+    : initialProject;
+  const initialWorkspace = hasInitialPositioningOverride
+    ? workspaceFromPositioning(initialPositioning, initialWorkflowProject)
+    : {
+        keyword: "敏感肌修护",
+        topics: demoTopics,
+        benchmark: demoBenchmark,
+        draft: demoDraft,
+        publishTask: demoPublishTask,
+      };
   const initialAiStatus = initialHomepageAnalysis
     ? "本地模板已分析主页"
     : initialPositioningInput
@@ -416,14 +517,15 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
       : "本地模板模式";
   const [generationMode, setGenerationMode] = useState<GenerationMode>("local");
   const [aiStatus, setAiStatus] = useState(initialAiStatus);
-  const [project, setProject] = useState<Project>(initialProject);
-  const [projectForm, setProjectForm] = useState<ProjectFormState>(() => projectToForm(initialProject));
+  const [project, setProject] = useState<Project>(initialWorkflowProject);
+  const [projectForm, setProjectForm] = useState<ProjectFormState>(() => projectToForm(initialWorkflowProject));
   const [settingsStatus, setSettingsStatus] = useState(storedProjectAtRender ? "已加载本地设置" : "使用默认设置");
   const [isGeneratingPositioning, setIsGeneratingPositioning] = useState(false);
   const [isAnalyzingHomepage, setIsAnalyzingHomepage] = useState(false);
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
+  const [isRewritingCompliance, setIsRewritingCompliance] = useState(false);
   const [posterImages, setPosterImages] = useState<GeneratedPosterAsset[]>([]);
   const [subjectArea, setSubjectArea] = useState(initialPositioning.subjectArea);
   const [accountAudience, setAccountAudience] = useState(initialPositioning.audience);
@@ -438,14 +540,16 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     initialPositioning.benchmarkFilters.subjectArea
   );
   const [benchmarkFormat, setBenchmarkFormat] = useState<BenchmarkContentFormat>("全部");
-  const [keyword, setKeyword] = useState("敏感肌修护");
-  const [topics, setTopics] = useState<TopicCandidate[]>(demoTopics);
-  const [selectedTopicId, setSelectedTopicId] = useState(demoTopics[0].id);
-  const [rawBenchmarkText, setRawBenchmarkText] = useState(demoRawBenchmark.body);
-  const [benchmark, setBenchmark] = useState<BenchmarkNote>(demoBenchmark);
-  const [draft, setDraft] = useState<ContentDraft>(demoDraft);
-  const [scanText, setScanText] = useState(`${demoDraft.selectedTitle}\n${demoDraft.body}`);
-  const [publishTask, setPublishTask] = useState<PublishTask>(demoPublishTask);
+  const [keyword, setKeyword] = useState(initialWorkspace.keyword);
+  const [topics, setTopics] = useState<TopicCandidate[]>(initialWorkspace.topics);
+  const [selectedTopicId, setSelectedTopicId] = useState(initialWorkspace.topics[0].id);
+  const [rawBenchmarkText, setRawBenchmarkText] = useState(initialWorkspace.benchmark.body);
+  const [benchmark, setBenchmark] = useState<BenchmarkNote>(initialWorkspace.benchmark);
+  const [draft, setDraft] = useState<ContentDraft>(initialWorkspace.draft);
+  const [scanText, setScanText] = useState(
+    `${initialWorkspace.draft.selectedTitle}\n${initialWorkspace.draft.body}`
+  );
+  const [publishTask, setPublishTask] = useState<PublishTask>(initialWorkspace.publishTask);
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
   const [mobilePublishCardPayload] = useState<MobilePublishCardPayload | null>(() =>
@@ -489,9 +593,32 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
   );
 
   function applyPositioning(nextPositioning: AccountPositioning) {
+    const nextProject = projectFromPositioning(nextPositioning, project);
+    const nextWorkspace = workspaceFromPositioning(nextPositioning, nextProject);
+
+    setProject(nextProject);
+    setProjectForm(projectToForm(nextProject));
+    setSettingsStatus("定位已同步到项目设置");
+    setSubjectArea(nextPositioning.subjectArea);
+    setAccountAudience(nextPositioning.audience);
+    setDifferentiator(nextPositioning.differentiator);
+    setAccountTone(nextPositioning.tone);
     setAccountPositioning(nextPositioning);
     setBenchmarkSubjectArea(nextPositioning.benchmarkFilters.subjectArea);
     setBenchmarkFormat("全部");
+    setKeyword(nextWorkspace.keyword);
+    setTopics(nextWorkspace.topics);
+    setSelectedTopicId(nextWorkspace.topics[0].id);
+    setRawBenchmarkText(nextWorkspace.benchmark.body);
+    setBenchmark(nextWorkspace.benchmark);
+    setDraft(nextWorkspace.draft);
+    setScanText(`${nextWorkspace.draft.selectedTitle}\n${nextWorkspace.draft.body}`);
+    setPublishTask(nextWorkspace.publishTask);
+    setPosterImages([]);
+    setCopied(false);
+    setShared(false);
+    setMobilePublishCardUrl("");
+    setMobileCardStatus("");
   }
 
   function syncPosterAssets(nextAssets: GeneratedPosterAsset[]) {
@@ -648,25 +775,9 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
     const candidate = filteredBenchmarkCandidates.find((item) => item.id === candidateId);
     if (!candidate) return;
 
-    const body = [
-      `${candidate.audiencePain}，这类开场适合先把用户拉进具体场景。`,
-      `1. 拆标题：${candidate.title}`,
-      `2. 拆主体：${candidate.contentFormat} / ${candidate.subjectArea}`,
-      `3. 拆互动：用评论区问题继续追选题`,
-      `#${candidate.tags.join(" #")}`,
-    ].join("\n");
-    setRawBenchmarkText(body);
-    setBenchmark(
-      analyzeBenchmarkNote({
-        id: candidate.id,
-        projectId: candidate.projectId,
-        title: candidate.title,
-        author: candidate.author,
-        body,
-        metrics: candidate.metrics,
-        importedAt: new Date().toISOString(),
-      })
-    );
+    const nextBenchmark = benchmarkFromCandidate(candidate);
+    setRawBenchmarkText(nextBenchmark.body);
+    setBenchmark(nextBenchmark);
   }
 
   async function handleGenerateDraft() {
@@ -746,6 +857,33 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
       );
     } finally {
       setIsGeneratingPoster(false);
+    }
+  }
+
+  async function handleRewriteCompliance() {
+    if (generationMode === "local") {
+      setScanText(compliance.sanitizedText);
+      setAiStatus("本地规则已改写");
+      return;
+    }
+
+    setIsRewritingCompliance(true);
+    setAiStatus("OpenAI 正在合规改写");
+    try {
+      const payload = await postJson<{
+        rewrittenText: string;
+        changeNotes: string[];
+      }>("/api/ai/compliance-rewrite/", {
+        project,
+        text: scanText,
+      });
+      setScanText(payload.rewrittenText);
+      setAiStatus("OpenAI 已合规改写");
+    } catch (error) {
+      setScanText(compliance.sanitizedText);
+      setAiStatus(error instanceof Error ? `OpenAI 不可用：${error.message}` : "OpenAI 不可用");
+    } finally {
+      setIsRewritingCompliance(false);
     }
   }
 
@@ -961,6 +1099,10 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
                 <button
                   className="inline-flex h-10 items-center gap-2 rounded-md bg-[#2E6B5F] px-3 text-sm font-semibold text-white"
                   form="positioning-form"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handleGeneratePositioning();
+                  }}
                   type="submit"
                   disabled={isGeneratingPositioning}
                 >
@@ -1456,7 +1598,20 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
             <SectionHeader
               title="Compliance Guard"
               icon={ShieldCheck}
-              aside={<RiskBadge level={compliance.riskLevel} />}
+              aside={
+                <div className="flex flex-wrap items-center gap-2">
+                  <RiskBadge level={compliance.riskLevel} />
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={handleRewriteCompliance}
+                    type="button"
+                    disabled={isRewritingCompliance}
+                  >
+                    <Sparkles size={16} />
+                    合规改写
+                  </button>
+                </div>
+              }
             />
             <div className="grid gap-4 lg:grid-cols-2">
               <textarea
@@ -1472,7 +1627,10 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
                   </div>
                 ) : (
                   compliance.issues.map((issue) => (
-                    <div key={`${issue.term}-${issue.index}`} className="rounded-lg border border-[#D8D2C1] bg-white p-4">
+                    <div
+                      key={`${issue.term}-${issue.category}-${issue.index}`}
+                      className="rounded-lg border border-[#D8D2C1] bg-white p-4"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold">{issue.term}</p>
