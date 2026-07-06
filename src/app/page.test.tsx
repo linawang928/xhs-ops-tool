@@ -39,7 +39,9 @@ describe("home dashboard", () => {
       })
     );
 
-    expect(screen.getByRole("form", { name: "账号定位生成" })).toHaveAttribute("method", "get");
+    const positioningForm = screen.getByRole("form", { name: "账号定位生成" });
+    expect(positioningForm).toHaveAttribute("method", "get");
+    expect(positioningForm).not.toHaveAttribute("action");
     expect(screen.getByRole("button", { name: "生成定位" })).toHaveAttribute(
       "form",
       "positioning-form"

@@ -472,7 +472,6 @@ export function XhsOpsApp({ initialPositioningInput }: XhsOpsAppProps = {}) {
               <form
                 id="positioning-form"
                 aria-label="账号定位生成"
-                action="/"
                 method="get"
                 onSubmit={handlePositioningSubmit}
                 className="rounded-lg border border-[#D8D2C1] bg-white p-4"
