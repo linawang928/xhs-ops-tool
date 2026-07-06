@@ -49,6 +49,43 @@ describe("home dashboard", () => {
     expect(screen.queryByText(/To get started/)).not.toBeInTheDocument();
   });
 
+  it("shows OpenAI text and GPT Image provider readiness when the backend is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        serverApiAvailable: true,
+        hasOpenAIKey: true,
+        textModel: "gpt-5.5",
+        imageModel: "gpt-image-2",
+        features: {
+          structuredText: true,
+          posterImage: true,
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderHome();
+
+    expect(await screen.findByText("OpenAI 已连接")).toBeInTheDocument();
+    expect(screen.getByText("Text gpt-5.5")).toBeInTheDocument();
+    expect(screen.getByText("Image gpt-image-2")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai/status/",
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  it("renders provider status from the server on the first screen", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+
+    await renderHome();
+
+    expect(screen.getByText("OpenAI 未配置")).toBeInTheDocument();
+    expect(screen.getByText("Text gpt-5.5")).toBeInTheDocument();
+    expect(screen.getByText("Image gpt-image-2")).toBeInTheDocument();
+  });
+
   it("saves project settings locally and applies custom forbidden words to compliance checks", async () => {
     const user = userEvent.setup();
     await renderHome();

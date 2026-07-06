@@ -1,4 +1,5 @@
 import { XhsOpsApp } from "@/components/xhs-ops-app";
+import { getAiProviderStatus } from "@/lib/ai/status";
 import type { AccountPositioningInput } from "@/lib/core/types";
 import { demoProject } from "@/lib/sample-data";
 
@@ -44,6 +45,7 @@ export default async function Home({
     <XhsOpsApp
       initialPositioningInput={getInitialPositioningInput(params)}
       initialHomepageText={getInitialHomepageText(params)}
+      initialProviderStatus={getAiProviderStatus()}
     />
   );
 }

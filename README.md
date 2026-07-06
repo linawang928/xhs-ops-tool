@@ -30,6 +30,8 @@ pnpm dev
 3. 默认图片模型为 `OPENAI_IMAGE_MODEL=gpt-image-2`。
 4. 启动 `pnpm dev` 后，在页面顶部把“生成模式”切到 `OpenAI GPT`。
 
+右侧 `Provider Slots` 会显示当前后端是否检测到 `OPENAI_API_KEY`，以及文本模型和 GPT Image 2 图片模型是否可用。
+
 可用的 OpenAI 功能：
 
 - 账号定位：调用 `/api/ai/positioning`

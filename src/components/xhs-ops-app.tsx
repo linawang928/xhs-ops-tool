@@ -20,7 +20,8 @@ import {
   Upload,
 } from "lucide-react";
 import NextImage from "next/image";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import type { AiProviderStatusPayload } from "@/lib/ai/status";
 import { filterBenchmarkCandidates, generateAccountPositioning } from "@/lib/core/account";
 import {
   analyzeAccountHomepage,
@@ -67,6 +68,7 @@ type GenerationMode = "local" | "openai";
 interface XhsOpsAppProps {
   initialPositioningInput?: AccountPositioningInput;
   initialHomepageText?: string;
+  initialProviderStatus?: AiProviderStatusPayload;
 }
 
 const demoHomepageText = [
@@ -107,6 +109,44 @@ interface PositioningWorkspace {
   publishTask: PublishTask;
 }
 
+type ProviderStatus =
+  | {
+      kind: "checking";
+      label: string;
+      detail: string;
+      textModel: string;
+      imageModel: string;
+    }
+  | {
+      kind: "ready";
+      label: string;
+      detail: string;
+      textModel: string;
+      imageModel: string;
+    }
+  | {
+      kind: "missing-key";
+      label: string;
+      detail: string;
+      textModel: string;
+      imageModel: string;
+    }
+  | {
+      kind: "static";
+      label: string;
+      detail: string;
+      textModel: string;
+      imageModel: string;
+    };
+
+const defaultProviderStatus: ProviderStatus = {
+  kind: "checking",
+  label: "检测 OpenAI",
+  detail: "正在检查本地 Next API 后端和 GPT Image 2 配置。",
+  textModel: "Text 检测中",
+  imageModel: "Image 检测中",
+};
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
@@ -118,6 +158,42 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     throw new Error(payload.error ?? `Request failed with HTTP ${response.status}`);
   }
   return payload as T;
+}
+
+function providerStatusFromPayload(payload: Partial<AiProviderStatusPayload>): ProviderStatus {
+  const textModel = payload.textModel ?? "gpt-5.5";
+  const imageModel = payload.imageModel ?? "gpt-image-2";
+
+  if (payload.serverApiAvailable && payload.hasOpenAIKey) {
+    return {
+      kind: "ready",
+      label: "OpenAI 已连接",
+      detail: "本地后端已配置 OPENAI_API_KEY，文案与海报可走 OpenAI API。",
+      textModel: `Text ${textModel}`,
+      imageModel: `Image ${imageModel}`,
+    };
+  }
+
+  return {
+    kind: "missing-key",
+    label: "OpenAI 未配置",
+    detail: "在 .env.local 设置 OPENAI_API_KEY 后重启 pnpm dev，即可调用 GPT 文案和 GPT Image 2。",
+    textModel: `Text ${textModel}`,
+    imageModel: `Image ${imageModel}`,
+  };
+}
+
+async function fetchProviderStatus(): Promise<ProviderStatus> {
+  const response = await fetch("/api/ai/status/", {
+    method: "GET",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Provider status failed with HTTP ${response.status}`);
+  }
+
+  return providerStatusFromPayload((await response.json()) as Partial<AiProviderStatusPayload>);
 }
 
 function parseHomepageText(rawText: string, projectId: string): AccountHomepageInput {
@@ -301,6 +377,13 @@ function currentMobileCardUrlParts() {
   };
 }
 
+function providerStatusClass(kind: ProviderStatus["kind"]) {
+  if (kind === "ready") return "bg-[#E4F1E8] text-[#214F45]";
+  if (kind === "missing-key") return "bg-[#FFF3C9] text-[#74530C]";
+  if (kind === "static") return "bg-[#FBE3E8] text-[#9D2633]";
+  return "bg-[#F8F3E7] text-[#6D6A61]";
+}
+
 function posterAssetsToManifest(assets: GeneratedPosterAsset[]): PublishTask["assetManifest"] {
   return assets.map((asset) => ({
     cardId: asset.cardId,
@@ -479,7 +562,11 @@ function MobilePublishCardView({ payload }: { payload: MobilePublishCardPayload 
   );
 }
 
-export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsOpsAppProps = {}) {
+export function XhsOpsApp({
+  initialPositioningInput,
+  initialHomepageText,
+  initialProviderStatus,
+}: XhsOpsAppProps = {}) {
   const storedProjectAtRender = readStoredProject();
   const initialProject = storedProjectAtRender ?? demoProject;
   const initialHomepageAnalysis = initialHomepageText
@@ -517,6 +604,9 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
       : "本地模板模式";
   const [generationMode, setGenerationMode] = useState<GenerationMode>("local");
   const [aiStatus, setAiStatus] = useState(initialAiStatus);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus>(
+    initialProviderStatus ? providerStatusFromPayload(initialProviderStatus) : defaultProviderStatus
+  );
   const [project, setProject] = useState<Project>(initialWorkflowProject);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(() => projectToForm(initialWorkflowProject));
   const [settingsStatus, setSettingsStatus] = useState(storedProjectAtRender ? "已加载本地设置" : "使用默认设置");
@@ -591,6 +681,32 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
       }),
     [accountPositioning, benchmarkFormat, benchmarkSubjectArea]
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetchProviderStatus()
+      .then((status) => {
+        if (isMounted) {
+          setProviderStatus(status);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setProviderStatus({
+            kind: "static",
+            label: "静态预览",
+            detail: "当前页面没有可用的 Next API 后端；OpenAI/GPT Image 2 请在本地 pnpm dev 中使用。",
+            textModel: "Text 本地模板",
+            imageModel: "Image 模板海报",
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   function applyPositioning(nextPositioning: AccountPositioning) {
     const nextProject = projectFromPositioning(nextPositioning, project);
@@ -1792,13 +1908,24 @@ export function XhsOpsApp({ initialPositioningInput, initialHomepageText }: XhsO
           <div className="rounded-lg border border-[#D8D2C1] bg-white p-5">
             <p className="text-xs font-semibold uppercase text-[#6D6A61]">Provider Slots</p>
             <div className="mt-4 grid gap-2 text-sm">
+              <div className={`rounded-md px-3 py-2 ${providerStatusClass(providerStatus.kind)}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold">{providerStatus.label}</span>
+                  <span className="text-xs font-semibold uppercase">GPT</span>
+                </div>
+                <p className="mt-1 text-xs leading-5">{providerStatus.detail}</p>
+              </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>SourceProvider</span>
                 <span className="font-semibold text-[#214F45]">Manual</span>
               </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>LLMProvider</span>
-                <span className="font-semibold text-[#74530C]">Local stub</span>
+                <span className="font-semibold text-[#74530C]">{providerStatus.textModel}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
+                <span>ImageProvider</span>
+                <span className="font-semibold text-[#74530C]">{providerStatus.imageModel}</span>
               </div>
               <div className="flex items-center justify-between rounded-md bg-[#F8F3E7] px-3 py-2">
                 <span>PublisherAdapter</span>
