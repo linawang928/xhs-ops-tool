@@ -6,7 +6,7 @@ import Home from "./page";
 async function renderHome(
   searchParams: Promise<Record<string, string | string[] | undefined>> = Promise.resolve({})
 ) {
-  render(await Home({ searchParams }));
+  return render(await Home({ searchParams }));
 }
 
 function ensureLocalStorage() {
@@ -129,6 +129,51 @@ describe("home dashboard", () => {
     expect(await screen.findByDisplayValue("租房收纳号")).toBeInTheDocument();
     expect(screen.getByLabelText("项目行业")).toHaveValue("家居收纳");
     expect(screen.getByLabelText("禁用词")).toHaveValue("永不复乱");
+  });
+
+  it("autosaves and restores the active workspace after reload", async () => {
+    const user = userEvent.setup();
+    const view = await renderHome();
+
+    await user.clear(screen.getByLabelText("笔记标题"));
+    await user.type(screen.getByLabelText("笔记标题"), "租房收纳先做入口区");
+    await user.clear(screen.getByLabelText("正文"));
+    await user.type(screen.getByLabelText("正文"), "先把钥匙、快递和包的位置固定下来。");
+    await user.clear(screen.getByLabelText("话题标签"));
+    await user.type(screen.getByLabelText("话题标签"), "租房收纳, 入口区整理");
+    await user.click(screen.getByRole("button", { name: "加入队列" }));
+
+    const saved = JSON.parse(window.localStorage.getItem("xhs-ops-workspace") ?? "{}");
+    expect(saved.draft.selectedTitle).toBe("租房收纳先做入口区");
+    expect(saved.publishTask.status).toBe("queued");
+
+    view.unmount();
+    await renderHome();
+
+    expect(screen.getByLabelText("笔记标题")).toHaveValue("租房收纳先做入口区");
+    expect(screen.getByLabelText("正文")).toHaveValue("先把钥匙、快递和包的位置固定下来。");
+    expect(screen.getByLabelText("话题标签")).toHaveValue("租房收纳, 入口区整理");
+    expect(screen.getByText("queued")).toBeInTheDocument();
+    expect(screen.getByText(/#租房收纳 #入口区整理/)).toBeInTheDocument();
+  });
+
+  it("exports and imports a complete workspace JSON backup", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.clear(screen.getByLabelText("笔记标题"));
+    await user.type(screen.getByLabelText("笔记标题"), "租房收纳先做入口区");
+    await user.click(screen.getByRole("button", { name: "导出工作区" }));
+
+    const exported = screen.getByLabelText("工作区 JSON");
+    expect((exported as HTMLTextAreaElement).value).toContain("租房收纳先做入口区");
+
+    await user.clear(screen.getByLabelText("笔记标题"));
+    await user.type(screen.getByLabelText("笔记标题"), "临时标题");
+    await user.click(screen.getByRole("button", { name: "导入工作区" }));
+
+    expect(screen.getByLabelText("笔记标题")).toHaveValue("租房收纳先做入口区");
+    expect(screen.getAllByText("工作区已导入").length).toBeGreaterThan(0);
   });
 
   it("renders generated positioning from query params for no-js form submissions", async () => {
