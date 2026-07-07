@@ -822,6 +822,24 @@ describe("home dashboard", () => {
     expect(screen.getByText("素材清单")).toBeInTheDocument();
   });
 
+  it("offers a downloadable Markdown publish package with copy and asset manifest", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.click(screen.getByRole("button", { name: "生成海报" }));
+
+    const downloadLink = screen.getByRole("link", { name: "下载发布包" });
+    expect(downloadLink).toHaveAttribute("download", "xhs-publish-package.md");
+    const href = downloadLink.getAttribute("href") ?? "";
+    expect(href).toMatch(/^data:text\/markdown;charset=utf-8,/);
+    const markdown = decodeURIComponent(href.replace("data:text/markdown;charset=utf-8,", ""));
+    expect(markdown).toContain("# 敏感肌修护痛点避坑清单：新手先看这 5 个细节");
+    expect(markdown).toContain("#敏感肌 #屏障修护 #护肤避坑");
+    expect(markdown).toContain("- [ ] 人工复核敏感词和导流表达");
+    expect(markdown).toContain("xhs-poster-1.svg");
+    expect(markdown).toContain("https://creator.xiaohongshu.com/publish/publish");
+  });
+
   it("shares the publish package through the mobile Web Share API", async () => {
     const user = userEvent.setup();
     const shareMock = vi.fn().mockResolvedValue(undefined);

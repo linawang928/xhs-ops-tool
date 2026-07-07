@@ -53,7 +53,11 @@ import {
   type MobilePublishCardAssetPreview,
   type MobilePublishCardPayload,
 } from "@/lib/core/publish-card";
-import { prepareManualPublishPackage, transitionPublishTask } from "@/lib/core/publish";
+import {
+  createPublishPackageMarkdown,
+  prepareManualPublishPackage,
+  transitionPublishTask,
+} from "@/lib/core/publish";
 import { generateTopicCandidates, parseImportedTopicRows } from "@/lib/core/topic";
 import type {
   AccountHomepageAnalysis,
@@ -1136,6 +1140,14 @@ export function XhsOpsApp({
   );
   const [mobilePublishCardUrl, setMobilePublishCardUrl] = useState("");
   const [mobileCardStatus, setMobileCardStatus] = useState("");
+  const publishPackageMarkdown = useMemo(
+    () => createPublishPackageMarkdown(publishTask, draft, project),
+    [draft, project, publishTask]
+  );
+  const publishPackageDownloadHref = useMemo(
+    () => `data:text/markdown;charset=utf-8,${encodeURIComponent(publishPackageMarkdown)}`,
+    [publishPackageMarkdown]
+  );
 
   const selectedTopic = useMemo(
     () => topics.find((topic) => topic.id === selectedTopicId) ?? topics[0],
@@ -3070,6 +3082,14 @@ export function XhsOpsApp({
                     <ClipboardCheck size={16} />
                     {copied ? "已复制" : "复制包"}
                   </button>
+                  <a
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1F2723] bg-white px-3 text-sm font-semibold text-[#1F2723]"
+                    href={publishPackageDownloadHref}
+                    download="xhs-publish-package.md"
+                  >
+                    <FileText size={16} />
+                    下载发布包
+                  </a>
                   <a
                     className="inline-flex h-10 items-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white"
                     href={publishTask.officialPublishUrl}

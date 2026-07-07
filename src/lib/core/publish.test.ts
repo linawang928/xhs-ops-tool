@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { prepareManualPublishPackage, transitionPublishTask } from "./publish";
+import {
+  createPublishPackageMarkdown,
+  prepareManualPublishPackage,
+  transitionPublishTask,
+} from "./publish";
 import type { ContentDraft, GeneratedPosterAsset, Project, PublishTask } from "./types";
 
 const project: Project = {
@@ -89,6 +93,39 @@ describe("publish queue", () => {
       },
     ]);
     expect(task.checklist).toContain("确认已下载或分享所有海报素材");
+  });
+
+  it("renders a Markdown publish package with copy, checklist, cards, and assets", () => {
+    const task = prepareManualPublishPackage(
+      draft,
+      project,
+      "2026-07-07T12:30:00.000Z",
+      [
+        {
+          id: "poster-card-1",
+          cardId: "card-1",
+          draftId: "draft-1",
+          source: "template",
+          url: "data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C/svg%3E",
+          alt: "敏感肌修护封面",
+          fileName: "xhs-poster-1.svg",
+          mimeType: "image/svg+xml",
+          width: 1080,
+          height: 1440,
+        },
+      ]
+    );
+
+    const markdown = createPublishPackageMarkdown(task, draft, project);
+
+    expect(markdown).toContain("# 敏感肌屏障修护避坑清单");
+    expect(markdown).toContain("账号：轻量护肤账号");
+    expect(markdown).toContain("先确认屏障状态");
+    expect(markdown).toContain("#敏感肌 #屏障修护 #护肤避坑");
+    expect(markdown).toContain("- [ ] 人工复核敏感词和导流表达");
+    expect(markdown).toContain("xhs-poster-1.svg");
+    expect(markdown).toContain("敏感肌修护");
+    expect(markdown).toContain("https://creator.xiaohongshu.com/publish/publish");
   });
 
   it("only allows publish tasks to move through the manual workflow order", () => {

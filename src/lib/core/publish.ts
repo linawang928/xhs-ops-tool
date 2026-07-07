@@ -67,3 +67,62 @@ export function transitionPublishTask(task: PublishTask, nextStatus: PublishTask
     updatedAt: "2026-07-06T10:05:00.000Z",
   };
 }
+
+export function createPublishPackageMarkdown(
+  task: PublishTask,
+  draft: ContentDraft,
+  project: Project
+) {
+  const hashtags = draft.hashtags.map((tag) => `#${tag}`).join(" ");
+  const cardLines = draft.assetCards.flatMap((card, index) => [
+    `### ${index + 1}. ${card.title}`,
+    `- 角色：${card.role}`,
+    `- 副标题：${card.subtitle}`,
+    `- 要点：${card.bullets.join(" / ")}`,
+    "",
+  ]);
+  const checklistLines = task.checklist.map((item) => `- [ ] ${item}`);
+  const assetLines =
+    task.assetManifest.length > 0
+      ? task.assetManifest.map(
+          (asset, index) =>
+            `- ${index + 1}. ${asset.fileName}（${asset.source === "openai" ? "GPT" : "模板"}，${asset.mimeType}）`
+        )
+      : ["- 暂无素材，请先在 Content Studio 生成海报。"];
+
+  return [
+    `# ${draft.selectedTitle}`,
+    "",
+    "## 账号信息",
+    `- 账号：${project.name}`,
+    `- 行业：${project.industry}`,
+    `- 人设：${project.persona}`,
+    `- 语气：${project.tone}`,
+    `- 目标人群：${project.audience}`,
+    "",
+    "## 发布信息",
+    `- 状态：${task.status}`,
+    `- 计划时间：${task.scheduledAt.replace("T", " ").slice(0, 16)}`,
+    `- 官方发布入口：${task.officialPublishUrl}`,
+    "",
+    "## 小红书文案",
+    "```text",
+    draft.selectedTitle,
+    "",
+    draft.body,
+    "",
+    hashtags,
+    "```",
+    "",
+    "## 图文卡片脚本",
+    ...cardLines,
+    "## 人工检查清单",
+    ...checklistLines,
+    "",
+    "## 素材清单",
+    ...assetLines,
+    "",
+    "## 备注",
+    "- 发布前请人工确认标题、图片顺序、合规表达和最终话题标签。",
+  ].join("\n");
+}
