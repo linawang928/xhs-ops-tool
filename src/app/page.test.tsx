@@ -654,6 +654,78 @@ describe("home dashboard", () => {
     expect(firstPosterBody.promptOverride).toBe(customPrompt);
   });
 
+  it("regenerates one poster card with its edited prompt without replacing the full set", async () => {
+    const user = userEvent.setup();
+    const posterBodies: Array<{ cardId?: string; promptOverride?: string }> = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/ai/status/") {
+        return {
+          ok: true,
+          json: async () => ({ serverApiAvailable: true, hasOpenAIKey: true }),
+        };
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        cardId?: string;
+        promptOverride?: string;
+      };
+      posterBodies.push(body);
+      const posterIndex = posterBodies.length;
+      const isSingleRegeneration = posterIndex > screen.getAllByLabelText(/卡片标题/).length;
+      return {
+        ok: true,
+        json: async () => ({
+          image: {
+            id: isSingleRegeneration ? `poster-updated-${body.cardId}` : `poster-${posterIndex}`,
+            url: isSingleRegeneration
+              ? "data:image/png;base64,poster-updated"
+              : `data:image/png;base64,poster-base64-${posterIndex}`,
+            alt: isSingleRegeneration ? "updated card poster" : `xhs poster ${posterIndex}`,
+            cardId: body.cardId,
+            draftId: "draft-topic-ai",
+            source: "openai",
+            fileName: isSingleRegeneration
+              ? "xhs-ai-poster-updated.png"
+              : `xhs-ai-poster-${posterIndex}.png`,
+            mimeType: "image/png",
+            width: 1024,
+            height: 1536,
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderHome();
+
+    const cardCount = screen.getAllByLabelText(/卡片标题/).length;
+    await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
+    await user.click(screen.getByRole("button", { name: "生成海报" }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/ai/poster/")).toHaveLength(cardCount)
+    );
+    const secondCardId = posterBodies[1]?.cardId;
+    const customPrompt = "只重生成第二张，突出流程步骤和留白";
+    await user.clear(screen.getAllByLabelText(/海报提示词/)[1]);
+    await user.type(screen.getAllByLabelText(/海报提示词/)[1], customPrompt);
+    await user.click(screen.getByRole("button", { name: "重生成本张 2" }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/ai/poster/")).toHaveLength(cardCount + 1)
+    );
+    expect(posterBodies.at(-1)).toMatchObject({
+      cardId: secondCardId,
+      promptOverride: customPrompt,
+    });
+    expect(await screen.findByRole("img", { name: "updated card poster" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,poster-updated"
+    );
+    expect(screen.getAllByRole("img", { name: /xhs poster|updated card poster/ })).toHaveLength(
+      cardCount
+    );
+    expect(screen.getAllByText("xhs-ai-poster-updated.png").length).toBeGreaterThan(0);
+  });
+
   it("saves browser OpenAI settings separately and keeps the API key out of workspace exports", async () => {
     const user = userEvent.setup();
     await renderHome();

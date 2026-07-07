@@ -1074,6 +1074,7 @@ export function XhsOpsApp({
   const [isAnalyzingBenchmark, setIsAnalyzingBenchmark] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
+  const [regeneratingPosterCardId, setRegeneratingPosterCardId] = useState<string | null>(null);
   const [isRewritingCompliance, setIsRewritingCompliance] = useState(false);
   const [posterImages, setPosterImages] = useState<GeneratedPosterAsset[]>(
     storedWorkspaceAtRender?.posterImages ?? []
@@ -1388,6 +1389,19 @@ export function XhsOpsApp({
     }));
   }
 
+  function mergePosterAsset(nextAsset: GeneratedPosterAsset) {
+    const nextAssets = posterImages.some((asset) => asset.cardId === nextAsset.cardId)
+      ? posterImages.map((asset) => (asset.cardId === nextAsset.cardId ? nextAsset : asset))
+      : [...posterImages, nextAsset];
+    const cardOrder = new Map(draft.assetCards.map((card, index) => [card.id, index]));
+
+    return nextAssets.sort(
+      (left, right) =>
+        (cardOrder.get(left.cardId) ?? Number.MAX_SAFE_INTEGER) -
+        (cardOrder.get(right.cardId) ?? Number.MAX_SAFE_INTEGER)
+    );
+  }
+
   function posterPromptForCard(card: ContentDraft["assetCards"][number]) {
     return posterPromptOverrides[card.id] ?? buildXhsPosterPrompt(project, draft, card);
   }
@@ -1410,6 +1424,13 @@ export function XhsOpsApp({
       delete nextPrompts[cardId];
       return nextPrompts;
     });
+  }
+
+  function templatePosterForCard(cardId: string) {
+    return (
+      createTemplatePosterAssets(draft, project).find((asset) => asset.cardId === cardId) ??
+      createTemplatePosterAssets(draft, project)[0]
+    );
   }
 
   function syncDraftState(nextDraft: ContentDraft, options: { clearPosters?: boolean } = {}) {
@@ -1902,6 +1923,61 @@ export function XhsOpsApp({
       );
     } finally {
       setIsGeneratingPoster(false);
+    }
+  }
+
+  async function handleRegeneratePosterCard(cardId: string) {
+    const cardNumber = Math.max(
+      1,
+      draft.assetCards.findIndex((card) => card.id === cardId) + 1
+    );
+
+    if (generationMode !== "openai") {
+      const templatePoster = templatePosterForCard(cardId);
+      syncPosterAssets(mergePosterAsset(templatePoster));
+      setAiStatus(`本地模板已重生成第 ${cardNumber} 张海报`);
+      return;
+    }
+
+    setRegeneratingPosterCardId(cardId);
+    setAiStatus(`OpenAI 正在重生成第 ${cardNumber} 张海报`);
+    try {
+      const useBrowserOpenAi = shouldUseBrowserOpenAi();
+      const settings = useBrowserOpenAi ? currentOpenAiSettings() : undefined;
+      const promptOverride = posterPromptForCardId(cardId);
+      const image = useBrowserOpenAi
+        ? await generateXhsPosterWithOpenAI({
+            project,
+            draft,
+            cardId,
+            promptOverride,
+            settings,
+          })
+        : (
+            await postJson<{ image: GeneratedPosterAsset }>("/api/ai/poster/", {
+              project,
+              draft,
+              cardId,
+              promptOverride,
+            })
+          ).image;
+
+      syncPosterAssets(mergePosterAsset(image));
+      setAiStatus(
+        useBrowserOpenAi
+          ? `浏览器 OpenAI 已重生成第 ${cardNumber} 张海报`
+          : `OpenAI 已重生成第 ${cardNumber} 张海报`
+      );
+    } catch (error) {
+      const templatePoster = templatePosterForCard(cardId);
+      syncPosterAssets(mergePosterAsset(templatePoster));
+      setAiStatus(
+        error instanceof Error
+          ? `OpenAI 图片不可用：${error.message}，已重生成第 ${cardNumber} 张模板海报`
+          : `OpenAI 图片不可用，已重生成第 ${cardNumber} 张模板海报`
+      );
+    } finally {
+      setRegeneratingPosterCardId(null);
     }
   }
 
@@ -2880,7 +2956,7 @@ export function XhsOpsApp({
                           onChange={(event) => handlePosterPromptChange(card.id, event.target.value)}
                         />
                       </label>
-                      <div className="flex justify-end">
+                      <div className="flex flex-wrap justify-end gap-2">
                         <button
                           className="inline-flex h-8 items-center rounded-md border border-[#D8D2C1] bg-white px-2 text-xs font-semibold text-[#214F45] disabled:opacity-50"
                           type="button"
@@ -2888,6 +2964,15 @@ export function XhsOpsApp({
                           onClick={() => handlePosterPromptReset(card.id)}
                         >
                           重置提示词
+                        </button>
+                        <button
+                          className="inline-flex h-8 items-center gap-1 rounded-md bg-[#1F2723] px-2 text-xs font-semibold text-white disabled:opacity-50"
+                          type="button"
+                          disabled={isGeneratingPoster || regeneratingPosterCardId !== null}
+                          onClick={() => handleRegeneratePosterCard(card.id)}
+                        >
+                          <ImageIcon size={14} />
+                          重生成本张 {cardIndex + 1}
                         </button>
                       </div>
                     </div>
