@@ -32,7 +32,11 @@ import {
   rewriteXhsComplianceWithOpenAI,
   type OpenAiGenerationSettings,
 } from "@/lib/ai/xhs-generation";
-import { filterBenchmarkCandidates, generateAccountPositioning } from "@/lib/core/account";
+import {
+  filterBenchmarkCandidates,
+  generateAccountPositioning,
+  parseImportedBenchmarkCandidates,
+} from "@/lib/core/account";
 import {
   analyzeAccountHomepage,
   buildPositioningInputFromHomepage,
@@ -56,6 +60,7 @@ import type {
   AccountPositioning,
   AccountPositioningInput,
   BenchmarkContentFormat,
+  BenchmarkCandidate,
   BenchmarkNote,
   ContentDraft,
   GeneratedPosterAsset,
@@ -151,6 +156,8 @@ interface StoredWorkspaceSnapshot extends PositioningWorkspace {
   homepageAnalysis: AccountHomepageAnalysis | null;
   benchmarkSubjectArea: string;
   benchmarkFormat: BenchmarkContentFormat;
+  rawBenchmarkCandidateImportText?: string;
+  customBenchmarkCandidates?: BenchmarkCandidate[];
   rawTopicImportText?: string;
   selectedTopicId: string;
   rawBenchmarkText: string;
@@ -438,6 +445,25 @@ function isBenchmarkNote(value: unknown): value is BenchmarkNote {
   );
 }
 
+function isBenchmarkCandidate(value: unknown): value is BenchmarkCandidate {
+  const candidate = value as Partial<BenchmarkCandidate>;
+  return Boolean(
+    candidate &&
+      typeof candidate.id === "string" &&
+      typeof candidate.projectId === "string" &&
+      typeof candidate.title === "string" &&
+      typeof candidate.author === "string" &&
+      typeof candidate.subjectArea === "string" &&
+      typeof candidate.contentFormat === "string" &&
+      typeof candidate.audiencePain === "string" &&
+      isStringArray(candidate.tags) &&
+      isRecord(candidate.metrics) &&
+      typeof candidate.metrics.likes === "number" &&
+      typeof candidate.metrics.saves === "number" &&
+      typeof candidate.metrics.comments === "number"
+  );
+}
+
 function isContentDraft(value: unknown): value is ContentDraft {
   const draft = value as Partial<ContentDraft>;
   return Boolean(
@@ -485,6 +511,11 @@ function isWorkspaceSnapshot(value: unknown): value is StoredWorkspaceSnapshot {
       typeof workspace.rawHomepageText === "string" &&
       typeof workspace.benchmarkSubjectArea === "string" &&
       isBenchmarkFormat(workspace.benchmarkFormat) &&
+      (workspace.rawBenchmarkCandidateImportText === undefined ||
+        typeof workspace.rawBenchmarkCandidateImportText === "string") &&
+      (workspace.customBenchmarkCandidates === undefined ||
+        (Array.isArray(workspace.customBenchmarkCandidates) &&
+          workspace.customBenchmarkCandidates.every(isBenchmarkCandidate))) &&
       typeof workspace.keyword === "string" &&
       Array.isArray(workspace.topics) &&
       workspace.topics.every(isTopicCandidate) &&
@@ -1060,6 +1091,12 @@ export function XhsOpsApp({
   const [benchmarkFormat, setBenchmarkFormat] = useState<BenchmarkContentFormat>(
     storedWorkspaceAtRender?.benchmarkFormat ?? "全部"
   );
+  const [rawBenchmarkCandidateImportText, setRawBenchmarkCandidateImportText] = useState(
+    storedWorkspaceAtRender?.rawBenchmarkCandidateImportText ?? ""
+  );
+  const [customBenchmarkCandidates, setCustomBenchmarkCandidates] = useState<BenchmarkCandidate[]>(
+    storedWorkspaceAtRender?.customBenchmarkCandidates ?? []
+  );
   const [keyword, setKeyword] = useState(initialWorkspace.keyword);
   const [topics, setTopics] = useState<TopicCandidate[]>(initialWorkspace.topics);
   const [rawTopicImportText, setRawTopicImportText] = useState(
@@ -1096,30 +1133,41 @@ export function XhsOpsApp({
     () => scanCompliance(scanText, project.forbiddenWords),
     [project.forbiddenWords, scanText]
   );
+  const allBenchmarkCandidates = useMemo(() => {
+    const customKeys = new Set(
+      customBenchmarkCandidates.map((candidate) => `${candidate.subjectArea}::${candidate.title}`)
+    );
+    return [
+      ...customBenchmarkCandidates,
+      ...demoBenchmarkCandidates.filter(
+        (candidate) => !customKeys.has(`${candidate.subjectArea}::${candidate.title}`)
+      ),
+    ];
+  }, [customBenchmarkCandidates]);
   const subjectAreaOptions = useMemo(
     () =>
       Array.from(
         new Set([
           accountPositioning.subjectArea,
-          ...demoBenchmarkCandidates.map((candidate) => candidate.subjectArea),
+          ...allBenchmarkCandidates.map((candidate) => candidate.subjectArea),
         ])
       ),
-    [accountPositioning.subjectArea]
+    [accountPositioning.subjectArea, allBenchmarkCandidates]
   );
   const contentFormatOptions = useMemo<BenchmarkContentFormat[]>(
     () => [
       "全部",
-      ...Array.from(new Set(demoBenchmarkCandidates.map((candidate) => candidate.contentFormat))),
+      ...Array.from(new Set(allBenchmarkCandidates.map((candidate) => candidate.contentFormat))),
     ],
-    []
+    [allBenchmarkCandidates]
   );
   const filteredBenchmarkCandidates = useMemo(
     () =>
-      filterBenchmarkCandidates(demoBenchmarkCandidates, accountPositioning, {
+      filterBenchmarkCandidates(allBenchmarkCandidates, accountPositioning, {
         subjectArea: benchmarkSubjectArea,
         contentFormat: benchmarkFormat,
       }),
-    [accountPositioning, benchmarkFormat, benchmarkSubjectArea]
+    [accountPositioning, allBenchmarkCandidates, benchmarkFormat, benchmarkSubjectArea]
   );
   const normalizedOpenAiSettings = useMemo(
     () => normalizeOpenAiSettings(openAiSettings),
@@ -1154,6 +1202,8 @@ export function XhsOpsApp({
       homepageAnalysis,
       benchmarkSubjectArea,
       benchmarkFormat,
+      rawBenchmarkCandidateImportText,
+      customBenchmarkCandidates,
       keyword,
       topics,
       rawTopicImportText,
@@ -1173,6 +1223,7 @@ export function XhsOpsApp({
     benchmark,
     benchmarkFormat,
     benchmarkSubjectArea,
+    customBenchmarkCandidates,
     differentiator,
     draft,
     draftHashtagInput,
@@ -1183,6 +1234,7 @@ export function XhsOpsApp({
     project,
     projectForm,
     publishTask,
+    rawBenchmarkCandidateImportText,
     rawBenchmarkText,
     rawHomepageText,
     rawTopicImportText,
@@ -1205,6 +1257,8 @@ export function XhsOpsApp({
     setHomepageAnalysis(snapshot.homepageAnalysis);
     setBenchmarkSubjectArea(snapshot.benchmarkSubjectArea);
     setBenchmarkFormat(snapshot.benchmarkFormat);
+    setRawBenchmarkCandidateImportText(snapshot.rawBenchmarkCandidateImportText ?? "");
+    setCustomBenchmarkCandidates(snapshot.customBenchmarkCandidates ?? []);
     setKeyword(snapshot.keyword);
     setTopics(snapshot.topics);
     setRawTopicImportText(snapshot.rawTopicImportText ?? "");
@@ -1623,6 +1677,32 @@ export function XhsOpsApp({
       setKeyword(importedTopics[0].keyword);
     }
     setAiStatus(`已导入 ${importedTopics.length} 条爆款选题`);
+  }
+
+  function handleImportBenchmarkCandidates() {
+    const importedCandidates = parseImportedBenchmarkCandidates(rawBenchmarkCandidateImportText, {
+      projectId: project.id,
+      subjectArea: benchmarkSubjectArea || accountPositioning.subjectArea,
+      contentFormat: benchmarkFormat,
+    });
+
+    if (importedCandidates.length === 0) {
+      setAiStatus("没有可导入的对标候选");
+      return;
+    }
+
+    const importedKeys = new Set(
+      importedCandidates.map((candidate) => `${candidate.subjectArea}::${candidate.title}`)
+    );
+    setCustomBenchmarkCandidates((currentCandidates) => [
+      ...importedCandidates,
+      ...currentCandidates.filter(
+        (candidate) => !importedKeys.has(`${candidate.subjectArea}::${candidate.title}`)
+      ),
+    ]);
+    setBenchmarkSubjectArea(importedCandidates[0].subjectArea);
+    setBenchmarkFormat("全部");
+    setAiStatus(`已导入 ${importedCandidates.length} 条对标候选`);
   }
 
   function currentRawBenchmarkNote(): RawBenchmarkNote {
@@ -2489,6 +2569,34 @@ export function XhsOpsApp({
                       ))}
                     </select>
                   </label>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 border-t border-[#D8D2C1] pt-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+                <label className="grid gap-2 text-xs font-semibold uppercase text-[#6D6A61]">
+                  对标候选导入
+                  <textarea
+                    className="min-h-28 rounded-md border border-[#CFC7B5] bg-[#FCFAF3] p-3 text-sm font-normal normal-case leading-6 text-[#1F2723] outline-none focus:border-[#2E6B5F]"
+                    value={rawBenchmarkCandidateImportText}
+                    onChange={(event) => setRawBenchmarkCandidateImportText(event.target.value)}
+                    placeholder={
+                      "标题,作者,主体区,内容形式,痛点,点赞,收藏,评论,标签\n咖啡新手手冲避坑清单,手冲记录员,咖啡入门,避坑清单,新手总买错器具和豆子,4800,3100,220,咖啡入门|手冲|避坑"
+                    }
+                    aria-label="对标候选导入"
+                  />
+                </label>
+                <div className="flex flex-col justify-end gap-3">
+                  <div className="rounded-md bg-[#F8F3E7] px-3 py-2 text-xs leading-5 text-[#6D6A61]">
+                    已导入 {customBenchmarkCandidates.length} 条
+                  </div>
+                  <button
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={handleImportBenchmarkCandidates}
+                    type="button"
+                    disabled={!rawBenchmarkCandidateImportText.trim()}
+                  >
+                    <Upload size={16} />
+                    导入对标候选
+                  </button>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 xl:grid-cols-3">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterBenchmarkCandidates, generateAccountPositioning } from "./account";
+import { filterBenchmarkCandidates, generateAccountPositioning, parseImportedBenchmarkCandidates } from "./account";
 import type { BenchmarkCandidate } from "./types";
 
 const benchmarkCandidates: BenchmarkCandidate[] = [
@@ -101,5 +101,44 @@ describe("account positioning", () => {
       "bench-skincare-2",
     ]);
     expect(filtered.every((candidate) => candidate.subjectArea === "护肤")).toBe(true);
+  });
+
+  it("parses imported benchmark rows into filterable candidates", () => {
+    const imported = parseImportedBenchmarkCandidates(
+      [
+        "标题,作者,主体区,内容形式,痛点,点赞,收藏,评论,标签",
+        "租房收纳入口区 5 个死角,小户型整理局,家居收纳,避坑清单,租房党入口区总是乱,5200,3600,240,租房收纳|入口区|避坑",
+        "小户型动线整理流程,动线改造笔记,家居收纳,流程模板,早上出门总找不到东西,3900,2600,156,小户型 动线",
+      ].join("\n"),
+      { projectId: "project-1", subjectArea: "护肤", contentFormat: "全部" }
+    );
+
+    expect(imported).toHaveLength(2);
+    expect(imported[0]).toMatchObject({
+      projectId: "project-1",
+      title: "租房收纳入口区 5 个死角",
+      author: "小户型整理局",
+      subjectArea: "家居收纳",
+      contentFormat: "避坑清单",
+      audiencePain: "租房党入口区总是乱",
+      tags: ["租房收纳", "入口区", "避坑"],
+      metrics: { likes: 5200, saves: 3600, comments: 240 },
+    });
+  });
+
+  it("parses newline-only benchmark titles with account subject defaults", () => {
+    const imported = parseImportedBenchmarkCandidates(
+      "敏感肌屏障修护避坑清单\n油敏肌早八护肤流程",
+      { projectId: "project-1", subjectArea: "护肤", contentFormat: "流程模板" }
+    );
+
+    expect(imported).toHaveLength(2);
+    expect(imported[0]).toMatchObject({
+      author: "手动导入",
+      subjectArea: "护肤",
+      contentFormat: "流程模板",
+      metrics: { likes: 0, saves: 0, comments: 0 },
+    });
+    expect(imported[0].tags).toContain("护肤");
   });
 });

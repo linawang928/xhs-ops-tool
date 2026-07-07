@@ -461,6 +461,32 @@ describe("home dashboard", () => {
     expect(screen.getByLabelText("笔记标题")).toHaveValue("租房收纳入口区避坑清单");
   });
 
+  it("imports benchmark candidates and filters them by the imported subject area", async () => {
+    const user = userEvent.setup();
+    await renderHome();
+
+    await user.clear(screen.getByLabelText("对标候选导入"));
+    await user.type(
+      screen.getByLabelText("对标候选导入"),
+      [
+        "标题,作者,主体区,内容形式,痛点,点赞,收藏,评论,标签",
+        "咖啡新手手冲避坑清单,手冲记录员,咖啡入门,避坑清单,新手总买错器具和豆子,4800,3100,220,咖啡入门|手冲|避坑",
+      ].join("\n")
+    );
+    await user.click(screen.getByRole("button", { name: "导入对标候选" }));
+
+    expect(screen.getByText("已导入 1 条对标候选")).toBeInTheDocument();
+    expect(screen.getByLabelText("主体区")).toHaveValue("咖啡入门");
+    expect(screen.getByRole("option", { name: "咖啡入门" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /咖啡新手手冲避坑清单/ }));
+
+    expect((screen.getByLabelText("对标笔记正文") as HTMLTextAreaElement).value).toContain(
+      "咖啡新手手冲避坑清单"
+    );
+    expect(screen.getAllByText(/新手总买错器具和豆子/).length).toBeGreaterThan(0);
+  });
+
   it("uses OpenAI to analyze benchmark notes in OpenAI mode", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
