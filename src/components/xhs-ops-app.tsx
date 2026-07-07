@@ -48,6 +48,7 @@ import { generateDraftFromTopic } from "@/lib/core/content";
 import { createTemplatePosterAssets } from "@/lib/core/poster-template";
 import {
   createMobilePublishCardPayload,
+  createMobilePublishCardQrSvg,
   createMobilePublishCardUrl,
   decodeMobilePublishCardHash,
   type MobilePublishCardAssetPreview,
@@ -1139,6 +1140,7 @@ export function XhsOpsApp({
     readMobilePublishCardFromLocation()
   );
   const [mobilePublishCardUrl, setMobilePublishCardUrl] = useState("");
+  const [mobilePublishCardQrUrl, setMobilePublishCardQrUrl] = useState("");
   const [mobileCardStatus, setMobileCardStatus] = useState("");
   const publishPackageMarkdown = useMemo(
     () => createPublishPackageMarkdown(publishTask, draft, project),
@@ -1300,6 +1302,7 @@ export function XhsOpsApp({
     setCopied(false);
     setShared(false);
     setMobilePublishCardUrl("");
+    setMobilePublishCardQrUrl("");
     setMobileCardStatus("");
     setSettingsStatus(status);
     setWorkspaceStatus(status);
@@ -1389,6 +1392,7 @@ export function XhsOpsApp({
     setCopied(false);
     setShared(false);
     setMobilePublishCardUrl("");
+    setMobilePublishCardQrUrl("");
     setMobileCardStatus("");
   }
 
@@ -1475,6 +1479,7 @@ export function XhsOpsApp({
     setCopied(false);
     setShared(false);
     setMobilePublishCardUrl("");
+    setMobilePublishCardQrUrl("");
     setMobileCardStatus("");
   }
 
@@ -1879,6 +1884,7 @@ export function XhsOpsApp({
     setCopied(false);
     setShared(false);
     setMobilePublishCardUrl("");
+    setMobilePublishCardQrUrl("");
     setMobileCardStatus("");
   }
 
@@ -2067,10 +2073,20 @@ export function XhsOpsApp({
   }
 
   async function handleCreateMobilePublishCard() {
+    const urlParts = currentMobileCardUrlParts();
     const payload = createMobilePublishCardPayload(publishTask, draft, posterImages);
-    const url = createMobilePublishCardUrl(payload, currentMobileCardUrlParts());
+    const qrPayload = createMobilePublishCardPayload(publishTask, draft);
+    const url = createMobilePublishCardUrl(payload, urlParts);
+    const qrUrl = createMobilePublishCardUrl(qrPayload, urlParts);
     setMobilePublishCardUrl(url);
-    setMobileCardStatus("手机卡已生成");
+    setMobilePublishCardQrUrl("");
+    try {
+      const qrSvg = await createMobilePublishCardQrSvg(qrUrl);
+      setMobilePublishCardQrUrl(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg)}`);
+      setMobileCardStatus("手机卡已生成");
+    } catch {
+      setMobileCardStatus("手机卡已生成，链接已复制");
+    }
 
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       await navigator.clipboard.writeText(url);
@@ -3119,6 +3135,16 @@ export function XhsOpsApp({
                 {mobilePublishCardUrl && (
                   <div className="mt-5 grid gap-2 rounded-lg border border-[#D8D2C1] bg-[#FCFAF3] p-3">
                     <p className="text-sm font-semibold text-[#214F45]">{mobileCardStatus}</p>
+                    {mobilePublishCardQrUrl && (
+                      <NextImage
+                        src={mobilePublishCardQrUrl}
+                        alt="手机发布卡二维码"
+                        width={240}
+                        height={240}
+                        unoptimized
+                        className="mx-auto aspect-square w-full max-w-48 rounded-md border border-[#D8D2C1] bg-white p-2"
+                      />
+                    )}
                     <a
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#1F2723] px-3 text-sm font-semibold text-white"
                       href={mobilePublishCardUrl}

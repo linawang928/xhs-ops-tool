@@ -4,6 +4,7 @@ import type { GeneratedPosterAsset } from "./types";
 import {
   XHS_APP_PUBLISH_URL,
   createMobilePublishCardPayload,
+  createMobilePublishCardQrSvg,
   createMobilePublishCardUrl,
   decodeMobilePublishCardHash,
 } from "./publish-card";
@@ -71,5 +72,20 @@ describe("mobile publish card", () => {
         url: lightweightPoster.url,
       },
     ]);
+  });
+
+  it("renders a scannable SVG QR code for the mobile card URL", async () => {
+    const payload = createMobilePublishCardPayload(demoPublishTask, demoDraft);
+    const url = createMobilePublishCardUrl(payload, {
+      origin: "https://linawang928.github.io",
+      pathname: "/xhs-ops-tool/",
+    });
+
+    const svg = await createMobilePublishCardQrSvg(url);
+
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("</svg>");
+    expect(svg).toContain("path");
+    expect(svg).toContain("手机发布卡二维码");
   });
 });

@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { decodeMobilePublishCardHash } from "@/lib/core/publish-card";
 import Home from "./page";
 
 async function renderHome(
@@ -916,10 +917,15 @@ describe("home dashboard", () => {
 
     const link = screen.getByRole("link", { name: "打开手机卡" });
     expect(link).toHaveAttribute("href", expect.stringContaining("#publish-card="));
+    expect(screen.getByRole("img", { name: "手机发布卡二维码" })).toHaveAttribute(
+      "src",
+      expect.stringMatching(/^data:image\/svg\+xml;charset=utf-8,/)
+    );
     expect(clipboardMock).toHaveBeenCalledWith(expect.stringContaining("#publish-card="));
     const copiedUrl = String(clipboardMock.mock.calls.at(-1)?.[0] ?? "");
-    const encodedPayload = copiedUrl.split("#publish-card=")[1];
-    const decodedPayload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+    const decodedPayload = decodeMobilePublishCardHash(copiedUrl.split("#")[1] ?? "");
+    expect(decodedPayload).not.toBeNull();
+    if (!decodedPayload) return;
     expect(decodedPayload.assetPreviews.length).toBeGreaterThan(0);
     expect(decodedPayload.assetPreviews[0]).toMatchObject({
       fileName: expect.stringContaining("xhs-poster-1"),
