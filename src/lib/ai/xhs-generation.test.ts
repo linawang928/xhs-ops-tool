@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { demoBenchmark, demoDraft, demoProject, demoRawBenchmark, demoTopics } from "@/lib/sample-data";
 import {
   analyzeXhsBenchmarkWithOpenAI,
+  buildXhsPosterPrompt,
   generateXhsDraftWithOpenAI,
   generateXhsPosterWithOpenAI,
   generateXhsTopicsWithOpenAI,
@@ -196,5 +197,42 @@ describe("xhs OpenAI generation helpers", () => {
         body: expect.stringContaining('"model":"gpt-image-2"'),
       })
     );
+  });
+
+  it("builds the default poster prompt from account, draft, and card context", () => {
+    const prompt = buildXhsPosterPrompt(demoProject, demoDraft, demoDraft.assetCards[0]);
+
+    expect(prompt).toContain(demoProject.industry);
+    expect(prompt).toContain(demoProject.tone);
+    expect(prompt).toContain(demoDraft.selectedTitle);
+    expect(prompt).toContain(demoDraft.assetCards[0].title);
+    expect(prompt).toContain(demoDraft.assetCards[0].bullets[0]);
+  });
+
+  it("uses an operator-edited poster prompt when provided", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: [{ b64_json: "poster-base64", revised_prompt: "custom poster prompt" }],
+      })
+    );
+
+    await generateXhsPosterWithOpenAI({
+      project: demoProject,
+      draft: demoDraft,
+      cardId: demoDraft.assetCards[0].id,
+      promptOverride: "竖版高质感海报，保留大标题，背景用浅绿色纹理",
+      settings: {
+        apiKey: "sk-browser",
+        baseUrl: "https://api.openai.test/v1",
+        imageModel: "gpt-image-2",
+      },
+      fetcher,
+    });
+
+    const requestBody = JSON.parse(String(fetcher.mock.calls[0][1]?.body ?? "{}")) as {
+      prompt: string;
+    };
+    expect(requestBody.prompt).toBe("竖版高质感海报，保留大标题，背景用浅绿色纹理");
+    expect(requestBody.prompt).not.toContain("生成一张小红书图文封面海报");
   });
 });

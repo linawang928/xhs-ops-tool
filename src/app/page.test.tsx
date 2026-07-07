@@ -605,6 +605,55 @@ describe("home dashboard", () => {
     expect(screen.getAllByText(`xhs-ai-poster-${cardCount}.png`).length).toBeGreaterThan(0);
   });
 
+  it("sends edited poster prompts to OpenAI poster generation", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/ai/status/") {
+        return {
+          ok: true,
+          json: async () => ({ serverApiAvailable: true, hasOpenAIKey: true }),
+        };
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        cardId?: string;
+        promptOverride?: string;
+      };
+      return {
+        ok: true,
+        json: async () => ({
+          image: {
+            id: `poster-${body.cardId}`,
+            url: "data:image/png;base64,poster-base64",
+            alt: "custom xhs poster",
+            cardId: body.cardId,
+            draftId: "draft-topic-ai",
+            source: "openai",
+            fileName: "xhs-ai-poster-1.png",
+            mimeType: "image/png",
+            width: 1024,
+            height: 1536,
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderHome();
+
+    const customPrompt = "竖版高质感海报，保留大标题，背景用浅绿色纹理";
+    await user.clear(screen.getAllByLabelText(/海报提示词/)[0]);
+    await user.type(screen.getAllByLabelText(/海报提示词/)[0], customPrompt);
+    await user.selectOptions(screen.getByLabelText("生成模式"), "openai");
+    await user.click(screen.getByRole("button", { name: "生成海报" }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/ai/poster/").length).toBeGreaterThan(0)
+    );
+    const firstPosterBody = JSON.parse(
+      String(fetchMock.mock.calls.find(([url]) => url === "/api/ai/poster/")?.[1]?.body ?? "{}")
+    ) as { promptOverride?: string };
+    expect(firstPosterBody.promptOverride).toBe(customPrompt);
+  });
+
   it("saves browser OpenAI settings separately and keeps the API key out of workspace exports", async () => {
     const user = userEvent.setup();
     await renderHome();

@@ -688,7 +688,7 @@ function cardIndex(draft: ContentDraft, card: AssetCard) {
   return index >= 0 ? index + 1 : 1;
 }
 
-function posterPrompt(project: Project, draft: ContentDraft, card: AssetCard) {
+export function buildXhsPosterPrompt(project: Project, draft: ContentDraft, card: AssetCard) {
   return [
     "生成一张小红书图文封面海报，竖版 3:4，中文排版清晰，适合手机首屏。",
     `账号行业：${project.industry}`,
@@ -707,11 +707,13 @@ export async function generateXhsPosterWithOpenAI(input: {
   project: Project;
   draft: ContentDraft;
   cardId?: string;
+  promptOverride?: string;
 } & OpenAiCallInput): Promise<GeneratedPosterAsset> {
   const card = selectCard(input.draft, input.cardId);
+  const prompt = input.promptOverride?.trim() || buildXhsPosterPrompt(input.project, input.draft, card);
   const image = await generatePosterImage({
     ...imageGenerationInput(input),
-    prompt: posterPrompt(input.project, input.draft, card),
+    prompt,
     aspectRatio: "3:4",
   });
 

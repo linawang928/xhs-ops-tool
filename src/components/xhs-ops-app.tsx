@@ -25,6 +25,7 @@ import type { AiProviderStatusPayload } from "@/lib/ai/status";
 import {
   analyzeXhsAccountHomepageWithOpenAI,
   analyzeXhsBenchmarkWithOpenAI,
+  buildXhsPosterPrompt,
   generateXhsDraftWithOpenAI,
   generateXhsPositioningWithOpenAI,
   generateXhsPosterWithOpenAI,
@@ -164,6 +165,7 @@ interface StoredWorkspaceSnapshot extends PositioningWorkspace {
   draftHashtagInput: string;
   scanText: string;
   posterImages: GeneratedPosterAsset[];
+  posterPromptOverrides?: Record<string, string>;
 }
 
 type ProviderStatus =
@@ -376,6 +378,10 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((item) => typeof item === "string");
+}
+
 function isBenchmarkFormat(value: unknown): value is BenchmarkContentFormat {
   return ["避坑清单", "流程模板", "路线合集", "测评对比", "全部"].includes(String(value));
 }
@@ -526,7 +532,9 @@ function isWorkspaceSnapshot(value: unknown): value is StoredWorkspaceSnapshot {
       typeof workspace.draftHashtagInput === "string" &&
       typeof workspace.scanText === "string" &&
       isPublishTask(workspace.publishTask) &&
-      Array.isArray(workspace.posterImages)
+      Array.isArray(workspace.posterImages) &&
+      (workspace.posterPromptOverrides === undefined ||
+        isStringRecord(workspace.posterPromptOverrides))
   );
 }
 
@@ -1070,6 +1078,9 @@ export function XhsOpsApp({
   const [posterImages, setPosterImages] = useState<GeneratedPosterAsset[]>(
     storedWorkspaceAtRender?.posterImages ?? []
   );
+  const [posterPromptOverrides, setPosterPromptOverrides] = useState<Record<string, string>>(
+    storedWorkspaceAtRender?.posterPromptOverrides ?? {}
+  );
   const [subjectArea, setSubjectArea] = useState(storedWorkspaceAtRender?.subjectArea ?? initialPositioning.subjectArea);
   const [accountAudience, setAccountAudience] = useState(
     storedWorkspaceAtRender?.accountAudience ?? initialPositioning.audience
@@ -1215,6 +1226,7 @@ export function XhsOpsApp({
       scanText,
       publishTask,
       posterImages,
+      posterPromptOverrides,
     };
   }, [
     accountAudience,
@@ -1231,6 +1243,7 @@ export function XhsOpsApp({
     homepageAnalysis,
     keyword,
     posterImages,
+    posterPromptOverrides,
     project,
     projectForm,
     publishTask,
@@ -1270,6 +1283,7 @@ export function XhsOpsApp({
     setScanText(snapshot.scanText);
     setPublishTask(snapshot.publishTask);
     setPosterImages(snapshot.posterImages);
+    setPosterPromptOverrides(snapshot.posterPromptOverrides ?? {});
     setCopied(false);
     setShared(false);
     setMobilePublishCardUrl("");
@@ -1358,6 +1372,7 @@ export function XhsOpsApp({
     setScanText(`${nextWorkspace.draft.selectedTitle}\n${nextWorkspace.draft.body}`);
     setPublishTask(nextWorkspace.publishTask);
     setPosterImages([]);
+    setPosterPromptOverrides({});
     setCopied(false);
     setShared(false);
     setMobilePublishCardUrl("");
@@ -1371,6 +1386,30 @@ export function XhsOpsApp({
       assetManifest: posterAssetsToManifest(nextAssets),
       updatedAt: new Date().toISOString(),
     }));
+  }
+
+  function posterPromptForCard(card: ContentDraft["assetCards"][number]) {
+    return posterPromptOverrides[card.id] ?? buildXhsPosterPrompt(project, draft, card);
+  }
+
+  function posterPromptForCardId(cardId?: string) {
+    const card = draft.assetCards.find((item) => item.id === cardId) ?? draft.assetCards[0];
+    return card ? posterPromptForCard(card) : undefined;
+  }
+
+  function handlePosterPromptChange(cardId: string, value: string) {
+    setPosterPromptOverrides((prompts) => ({
+      ...prompts,
+      [cardId]: value,
+    }));
+  }
+
+  function handlePosterPromptReset(cardId: string) {
+    setPosterPromptOverrides((prompts) => {
+      const nextPrompts = { ...prompts };
+      delete nextPrompts[cardId];
+      return nextPrompts;
+    });
   }
 
   function syncDraftState(nextDraft: ContentDraft, options: { clearPosters?: boolean } = {}) {
@@ -1801,6 +1840,7 @@ export function XhsOpsApp({
     setDraft(nextDraft);
     setDraftHashtagInput(nextDraft.hashtags.join(", "));
     setPosterImages([]);
+    setPosterPromptOverrides({});
     setScanText(`${nextDraft.selectedTitle}\n${nextDraft.body}`);
     setPublishTask(nextTask);
     setCopied(false);
@@ -1824,12 +1864,15 @@ export function XhsOpsApp({
       const settings = useBrowserOpenAi ? currentOpenAiSettings() : undefined;
       const cardIds = draft.assetCards.length > 0 ? draft.assetCards.map((card) => card.id) : [undefined];
       const images = await Promise.all(
-        cardIds.map(async (cardId) =>
-          useBrowserOpenAi
+        cardIds.map(async (cardId) => {
+          const promptOverride = posterPromptForCardId(cardId);
+
+          return useBrowserOpenAi
             ? generateXhsPosterWithOpenAI({
                 project,
                 draft,
                 cardId,
+                promptOverride,
                 settings,
               })
             : (
@@ -1837,9 +1880,10 @@ export function XhsOpsApp({
                   project,
                   draft,
                   cardId,
+                  promptOverride,
                 })
-              ).image
-        )
+              ).image;
+        })
       );
 
       syncPosterAssets(images);
@@ -2826,6 +2870,27 @@ export function XhsOpsApp({
                         onChange={(event) => handleAssetCardBulletsChange(card.id, event.target.value)}
                       />
                     </label>
+                    <div className="mt-3 grid gap-2">
+                      <label className="grid gap-1 text-xs font-medium text-[#6D6A61]">
+                        海报提示词 {cardIndex + 1}
+                        <textarea
+                          aria-label={`海报提示词 ${cardIndex + 1}`}
+                          className="min-h-36 rounded-md border border-[#D8D2C1] bg-[#FCFAF3] p-2 text-sm leading-5 text-[#3B403C] outline-none focus:border-[#2E6B5F]"
+                          value={posterPromptForCard(card)}
+                          onChange={(event) => handlePosterPromptChange(card.id, event.target.value)}
+                        />
+                      </label>
+                      <div className="flex justify-end">
+                        <button
+                          className="inline-flex h-8 items-center rounded-md border border-[#D8D2C1] bg-white px-2 text-xs font-semibold text-[#214F45] disabled:opacity-50"
+                          type="button"
+                          disabled={posterPromptOverrides[card.id] === undefined}
+                          onClick={() => handlePosterPromptReset(card.id)}
+                        >
+                          重置提示词
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -6,6 +6,7 @@ interface PosterBody {
   project: Project;
   draft: ContentDraft;
   cardId?: string;
+  promptOverride?: string;
 }
 
 function assertBody(value: unknown): PosterBody {
@@ -17,6 +18,7 @@ function assertBody(value: unknown): PosterBody {
     project: body.project,
     draft: body.draft,
     cardId: body.cardId,
+    promptOverride: typeof body.promptOverride === "string" ? body.promptOverride : undefined,
   };
 }
 
